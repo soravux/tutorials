@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorials</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e;
+    --accent:#58a6ff; --line:#30363d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink);
+    display:flex; align-items:center; justify-content:center; padding:32px;
+    -webkit-font-smoothing:antialiased;
+  }
+  main{width:100%; max-width:640px}
+  h1{font-size:clamp(28px,6vw,44px); letter-spacing:-.02em; margin-bottom:.35em}
+  p.lead{color:var(--muted); font-size:clamp(15px,2.4vw,19px); margin-bottom:1.6em}
+  a.card{
+    display:block; text-decoration:none; color:inherit;
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:22px 26px; transition:.15s;
+  }
+  a.card:hover{border-color:var(--accent); transform:translateY(-2px)}
+  a.card h2{font-size:clamp(19px,3vw,24px); margin-bottom:.3em}
+  a.card h2 .arrow{color:var(--accent)}
+  a.card p{color:var(--muted); font-size:15px; line-height:1.5}
+  footer{margin-top:2em; color:#586069; font-size:13px}
+  footer a{color:var(--accent); text-decoration:none}
+</style>
+</head>
+<body>
+  <main>
+    <h1>Tutorials</h1>
+    <p class="lead">Interactive, code-first walkthroughs.</p>
+
+    <a class="card" href="color/index.html">
+      <h2>How Color Actually Works <span class="arrow">&rarr;</span></h2>
+      <p>A field guide to digital color: perception, color spaces, gamma, the RGB&nbsp;&harr;&nbsp;XYZ matrix, ICC profiles, and camera calibration — with live, interactive slides.</p>
+    </a>
+
+    <footer>Source on <a href="https://github.com/soravux/tutorials" target="_blank" rel="noopener">GitHub</a>.</footer>
+  </main>
+</body>
+</html>
