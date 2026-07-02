@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/katex.min.js"></script>
+<title>How Color Actually Works</title>
+<style>
+  :root{
+    --bg:#0d1117;
+    --panel:#161b22;
+    --ink:#e6edf3;
+    --muted:#8b949e;
+    --accent:#58a6ff;
+    --red:#ff6b6b;
+    --green:#51cf66;
+    --blue:#5c7cfa;
+    --gold:#ffd43b;
+    --line:#30363d;
+    --code:#1c2128;
+    --scale:1.75;   /* renders at 100% browser zoom the way 175% zoom used to look */
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- deck mechanics ---------- */
+  /* Lay the deck out in a viewport shrunk by --scale, then scale it back up, so
+     everything (vw-, cq- and px-sized) is uniformly enlarged and still fits the
+     screen — i.e. 100% browser zoom looks like the old 175% zoom. Content sizing
+     uses container units (cqw/cqh) so it tracks this scaled stage, not the raw
+     viewport. */
+  .deck{
+    position:fixed; top:0; left:0;
+    width:calc(100vw / var(--scale)); height:calc(100vh / var(--scale));
+    transform:scale(var(--scale)); transform-origin:top left;
+    container-type:size;
+  }
+  .slide{
+    position:absolute;inset:0;
+    display:flex;flex-direction:column;
+    justify-content:center;
+    padding:6cqh 8cqw;
+    opacity:0;visibility:hidden;
+    transform:translateY(18px);
+    transition:opacity .45s ease, transform .45s ease, visibility .45s;
+    overflow-y:auto;
+  }
+  .slide.active{opacity:1;visibility:visible;transform:none}
+  .slide h1{font-size:clamp(28px,4.4cqw,60px);line-height:1.05;letter-spacing:-.02em;margin-bottom:.4em}
+  .slide h2{font-size:clamp(22px,2.8cqw,40px);line-height:1.1;letter-spacing:-.02em;margin-bottom:.7em}
+  .slide p{font-size:clamp(15px,1.5cqw,22px);line-height:1.55;color:var(--ink);max-width:60ch;margin-bottom:.9em}
+  .slide p.lead{color:var(--muted)}
+  .kicker{
+    text-transform:uppercase;letter-spacing:.22em;font-size:13px;font-weight:700;
+    color:var(--accent);margin-bottom:1.2em;display:flex;align-items:center;gap:10px;
+  }
+  .kicker::before{content:"";width:34px;height:2px;background:var(--accent);display:inline-block}
+  em.hl{color:var(--gold);font-style:normal;font-weight:600}
+  strong{color:#fff;font-weight:700}
+  .two{display:grid;grid-template-columns:1.05fr .95fr;gap:5cqw;align-items:center}
+  @media(max-width:820px){.two{grid-template-columns:1fr;gap:3cqh}}
+
+  code,pre{font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace}
+  pre{
+    background:var(--code);border:1px solid var(--line);border-radius:12px;
+    padding:18px 22px;font-size:clamp(12px,1.15cqw,17px);line-height:1.7;
+    color:#c9d1d9;overflow-x:auto;
+  }
+  .tag-r{color:var(--red)} .tag-g{color:var(--green)} .tag-b{color:var(--blue)} .tag-y{color:var(--gold)} .dim{color:var(--muted)}
+
+  ul.bul{list-style:none;max-width:60ch}
+  ul.bul li{
+    font-size:clamp(15px,1.5cqw,22px);line-height:1.5;margin-bottom:.85em;
+    padding-left:1.5em;position:relative;color:var(--ink);
+  }
+  ul.bul li::before{content:"";position:absolute;left:0;top:.55em;width:9px;height:9px;border-radius:50%;background:var(--accent)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px 28px}
+  .recipe{display:flex;flex-direction:column;gap:14px;max-width:420px}
+  .bar{height:34px;border-radius:8px;display:flex;align-items:center;padding-left:14px;font-weight:700;color:#08111f;font-size:15px}
+
+  /* ---------- progress + nav ---------- */
+  .hud{position:absolute;left:0;right:0;bottom:0;height:4px;background:#1c222b;z-index:30}
+  .hud .fill{height:100%;background:linear-gradient(90deg,var(--red),var(--gold),var(--green),var(--blue));transition:width .45s ease}
+  .nav{position:absolute;bottom:18px;right:24px;display:flex;gap:8px;align-items:center;z-index:31;color:var(--muted);font-size:13px}
+  .nav button{
+    background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:16px;line-height:1;
+    transition:.15s;
+  }
+  .nav button:hover{border-color:var(--accent);color:var(--accent)}
+  .counter{position:absolute;bottom:20px;left:24px;color:var(--muted);font-size:13px;letter-spacing:.04em;z-index:31;font-variant-numeric:tabular-nums}
+  .hint{position:absolute;top:18px;right:24px;color:#586069;font-size:12px;z-index:31}
+
+  /* ---------- interactive ---------- */
+  .iv{display:grid;grid-template-columns:1fr 1fr;gap:3cqw;align-items:center}
+  @media(max-width:900px){.iv{grid-template-columns:1fr;gap:3cqh}}
+  canvas.diagram{width:100%;max-width:480px;background:#070a0e;border:1px solid var(--line);border-radius:14px}
+  .controls{display:flex;flex-direction:column;gap:13px}
+  .chk{display:flex;align-items:center;gap:10px;font-size:16px;cursor:pointer;user-select:none}
+  .chk input{width:18px;height:18px;accent-color:var(--accent)}
+  .swatchkey{width:24px;height:13px;border-radius:4px;display:inline-block;border:1px solid #00000055}
+  .slider{display:grid;grid-template-columns:22px 1fr 46px;gap:12px;align-items:center;font-size:16px;font-family:monospace}
+  .slider input[type=range]{width:100%}
+  .rng-r{accent-color:#ff6b6b}.rng-g{accent-color:#51cf66}.rng-b{accent-color:#5c7cfa}
+  select.spc{background:var(--code);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:15px}
+  .mathout{font-family:"SF Mono",ui-monospace,Consolas,monospace;font-size:13px;line-height:1.6;color:#c9d1d9;white-space:pre-wrap}
+  .mathout .num{color:var(--gold)}
+  .bignum{font-variant-numeric:tabular-nums;text-align:right}
+  table.cmp{border-collapse:collapse;width:100%;font-size:clamp(12px,1.3cqw,18px);margin-top:.3em}
+  table.cmp th{text-align:left;color:var(--accent);font-weight:700;padding:7px 14px;border-bottom:2px solid var(--line)}
+  table.cmp td{padding:7px 14px;border-bottom:1px solid var(--line);color:var(--ink)}
+
+  /* ---------- equation blocks ---------- */
+  .eq{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-bottom:.9em;overflow-x:auto}
+  .eq .katex{font-size:clamp(13px,1.2cqw,18px)}
+  .eq .katex-display{margin:0 !important}
+  .eq .katex .mord,.eq .katex .mbin,.eq .katex .mrel,.eq .katex .mopen,.eq .katex .mclose,.eq .katex .mpunct{color:#e6edf3}
+  .eq .katex .mord.text{color:#c9d1d9}
+
+  /* ---------- section dividers ---------- */
+  .slide.divider{align-items:center;justify-content:center;text-align:center}
+  .divider-inner{max-width:none;display:flex;flex-direction:column;align-items:center;gap:0}
+  .divider .part-num{
+    text-transform:uppercase;letter-spacing:.3em;font-size:clamp(13px,1.5cqw,22px);font-weight:700;
+    color:var(--accent);margin-bottom:.7em;
+  }
+  .divider-rule{width:clamp(90px,10cqw,160px);height:4px;border-radius:2px;
+    background:linear-gradient(90deg,var(--red),var(--gold),var(--green),var(--blue));margin:.55em 0 .1em}
+  .divider h1{font-size:clamp(40px,7cqw,104px);line-height:1.02;letter-spacing:-.025em;margin:0}
+  .divider h1 code{font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;color:var(--gold)}
+  .divider .divider-sub{color:var(--muted);font-size:clamp(17px,2.1cqw,30px);line-height:1.4;max-width:34ch;margin-top:.55em}
+  .divider-link{
+    margin-top:1.2em;display:inline-flex;align-items:center;gap:8px;
+    font-family:"SF Mono",ui-monospace,Consolas,monospace;font-size:clamp(15px,1.6cqw,22px);
+    color:var(--accent);text-decoration:none;background:var(--code);
+    border:1px solid var(--line);border-radius:10px;padding:10px 18px;transition:.15s;
+  }
+  .divider-link:hover{border-color:var(--accent);color:#fff}
+
+  /* dense slides: trim vertical rhythm so they never spill the viewport */
+  .slide.tight{padding-top:2.8cqh;padding-bottom:2.8cqh}
+  .slide.tight .controls{gap:5px}
+  .slide.tight .kicker{margin-bottom:.45em}
+  .slide.tight .eq{margin-bottom:.2em;padding:9px 18px}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide">
+    <div class="kicker">A field guide to digital color</div>
+    <h1>What a color space<br>actually <em class="hl">is</em></h1>
+    <p class="lead" style="font-size:clamp(18px,1.8cqw,26px)">Why <span style="font-family:monospace"><span class="tag-r">R 235</span> <span class="tag-g">G 123</span> <span class="tag-b">B 85</span></span> means nothing on its own.</p>
+    <p style="font-size:15px;color:#586069;margin-top:.4em">Perception primer after <a href="https://www.eecs.yorku.ca/~mbrown/ICCV2023_Brown.html" style="color:var(--accent)" target="_blank" rel="noopener">Michael Brown, "Understanding Color &amp; the In-Camera Image Processing Pipeline," ICCV 2023</a>.</p>
+  </section>
+
+  <!-- DIVIDER: Part I Perception -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part I</div>
+      <h1>Perception</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">How your eyes turn a spectrum of light into three numbers.</p>
+    </div>
+  </section>
+
+  <!-- P1 perception: image formation -->
+  <section class="slide">
+    <div class="kicker">Perception primer · 1 / 3</div>
+    <h2 style="margin-bottom:.4em">Light → reflectance → observation</h2>
+    <div class="two">
+      <div>
+        <p>What reaches the eye is the illuminant's spectrum <strong>shaped by</strong> the surface: a wavelength-by-wavelength product. Each receptor then <strong>integrates</strong> that spectrum against its sensitivity:</p>
+<div class="eq" data-latex="\begin{aligned} \rho_k &= \int E(\lambda) \cdot R(\lambda) \cdot S_k(\lambda) \, d\lambda \\ k &\in \{L, M, S\} \quad \text{(eye)} \\ k &\in \{R, G, B\} \quad \text{(camera)} \end{aligned}"></div>
+        <p><strong>E</strong> illuminant SPD · <strong>R</strong> surface reflectance · <strong>S<sub>k</sub></strong> sensitivity. A <em class="hl">continuous spectrum becomes three numbers</em> — a massive, lossy projection.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+        <!-- figure 1: light path -->
+        <svg viewBox="0 0 380 140" width="100%" style="max-width:360px" font-family="monospace">
+          <defs>
+            <marker id="ahg" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="#ffd43b"/></marker>
+            <marker id="ahw" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="#e6edf3"/></marker>
+          </defs>
+          <g stroke="#ffd43b" stroke-width="1.5">
+            <line x1="55" y1="16" x2="55" y2="7"/><line x1="55" y1="64" x2="55" y2="73"/>
+            <line x1="31" y1="40" x2="22" y2="40"/><line x1="79" y1="40" x2="88" y2="40"/>
+            <line x1="38" y1="23" x2="31" y2="16"/><line x1="72" y1="23" x2="79" y2="16"/>
+            <line x1="38" y1="57" x2="31" y2="64"/><line x1="72" y1="57" x2="79" y2="64"/>
+          </g>
+          <circle cx="55" cy="40" r="12" fill="#ffd43b"/>
+          <line x1="68" y1="50" x2="172" y2="90" stroke="#ffd43b" stroke-width="2" marker-end="url(#ahg)"/>
+          <rect x="160" y="93" width="60" height="12" rx="3" fill="#c0392b" transform="rotate(-6 190 99)"/>
+          <line x1="206" y1="90" x2="306" y2="52" stroke="#e6edf3" stroke-width="2" marker-end="url(#ahw)"/>
+          <path d="M310 40 Q325 27 340 40 Q325 53 310 40 Z" fill="none" stroke="#c9d1d9" stroke-width="1.4"/>
+          <circle cx="325" cy="40" r="4.5" fill="#c9d1d9"/>
+          <g fill="#7d8794" font-size="14" text-anchor="middle">
+            <text x="55" y="95">source E(λ)</text>
+            <text x="190" y="127">surface R(λ)</text>
+            <text x="325" y="70">eye Sₖ</text>
+          </g>
+        </svg>
+        <!-- figure 2: interactive spectral product -->
+        <div style="display:flex;gap:14px;align-items:center;font-size:13px;color:var(--muted);flex-wrap:wrap;justify-content:center">
+          <label>Illuminant <select class="spc" id="p2Illum" style="font-size:13px;padding:4px 8px"><option>D65</option><option>D50</option><option>A (tungsten)</option><option>F2 (fluor.)</option></select></label>
+          <label>Reflectance <select class="spc" id="p2Refl" style="font-size:13px;padding:4px 8px"><option>Red</option><option>Green</option><option>Blue</option><option>Yellow</option><option>White</option></select></label>
+        </div>
+        <canvas id="p2Canvas" width="380" height="210" style="width:100%;max-width:380px;background:#0a0d12;border:1px solid #30363d;border-radius:10px"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- P2 perception: subjectivity -->
+  <section class="slide">
+    <div class="kicker">Perception primer · 2 / 3</div>
+    <div class="two">
+      <div>
+        <h2>Two spaces: physics and perception</h2>
+        <p><strong>Light is physics</strong> — a wave with a <strong>wavelength λ</strong>, out in the world. <strong>Colour is perception</strong> — what your brain builds from that light. They live in <em class="hl">two different spaces</em>.</p>
+        <p>A human eye senses light through <strong>three cone types</strong> — <span class="tag-r">L</span>, <span class="tag-g">M</span>, <span class="tag-b">S</span> (long / medium / short wavelength).</p>
+        <p>And the response is <strong>compressed</strong>: perception roughly tracks the <em class="hl">logarithm</em> of physical intensity (Weber–Fechner), not a linear scale. A doubling of photons does not feel like a doubling of brightness — which is exactly why we encode images with a gamma curve.</p>
+        <p style="color:var(--muted);font-size:15px">The measured cone sensitivities <strong>S<sub>k</sub>(λ)</strong>, k ∈ {L, M, S} (<a href="https://pubmed.ncbi.nlm.nih.gov/10814758/" style="color:var(--accent)" target="_blank" rel="noopener">Stockman &amp; Sharpe 2°</a>) — the same S<sub>k</sub> that drive the observation integral on the previous slide.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+        <!-- physics ↔ perception bridge diagram -->
+        <svg viewBox="0 0 500 110" width="100%" style="max-width:420px" font-family="monospace">
+          <!-- Physics block -->
+          <rect x="14" y="8" width="110" height="94" rx="10" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="69" y="60" text-anchor="middle" fill="#58a6ff" font-size="17" font-weight="bold">Physics</text>
+          <!-- Perception block -->
+          <rect x="356" y="8" width="110" height="94" rx="10" fill="none" stroke="#ffd43b" stroke-width="1.5"/>
+          <text x="411" y="60" text-anchor="middle" fill="#ffd43b" font-size="17" font-weight="bold">Perception</text>
+          <!-- camera: Physics → Perception -->
+          <line x1="128" y1="26" x2="356" y2="26" stroke="#7d8794" stroke-width="1.2"/>
+          <polygon points="356,26 348,22 348,30" fill="#7d8794"/>
+          <text x="242" y="21" text-anchor="middle" fill="#8b949e" font-size="14">camera</text>
+          <!-- display: Perception → Physics -->
+          <line x1="336" y1="50" x2="148" y2="50" stroke="#7d8794" stroke-width="1.2"/>
+          <polygon points="148,50 156,46 156,54" fill="#7d8794"/>
+          <text x="242" y="45" text-anchor="middle" fill="#8b949e" font-size="14">display</text>
+          <!-- eye: Physics → Perception -->
+          <line x1="128" y1="78" x2="356" y2="78" stroke="#7d8794" stroke-width="1.2"/>
+          <polygon points="356,78 348,74 348,82" fill="#7d8794"/>
+          <text x="242" y="73" text-anchor="middle" fill="#8b949e" font-size="14">eye</text>
+        </svg>
+        <!-- existing cone sensitivity graph -->
+        <svg viewBox="0 0 576 360" width="100%" style="max-width:560px" font-family="monospace">
+          <defs><linearGradient id="specg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgb(117,0,255)"/><stop offset="3%" stop-color="rgb(116,0,255)"/><stop offset="6%" stop-color="rgb(115,0,255)"/><stop offset="10%" stop-color="rgb(113,0,255)"/><stop offset="13%" stop-color="rgb(108,0,255)"/><stop offset="16%" stop-color="rgb(99,0,255)"/><stop offset="19%" stop-color="rgb(81,0,255)"/><stop offset="23%" stop-color="rgb(26,0,255)"/><stop offset="26%" stop-color="rgb(0,45,255)"/><stop offset="29%" stop-color="rgb(0,136,255)"/><stop offset="32%" stop-color="rgb(0,232,251)"/><stop offset="35%" stop-color="rgb(0,255,216)"/><stop offset="39%" stop-color="rgb(0,255,100)"/><stop offset="42%" stop-color="rgb(0,255,0)"/><stop offset="45%" stop-color="rgb(0,255,0)"/><stop offset="48%" stop-color="rgb(0,255,0)"/><stop offset="52%" stop-color="rgb(0,255,0)"/><stop offset="55%" stop-color="rgb(169,255,0)"/><stop offset="58%" stop-color="rgb(255,255,0)"/><stop offset="61%" stop-color="rgb(255,232,0)"/><stop offset="65%" stop-color="rgb(255,172,0)"/><stop offset="68%" stop-color="rgb(255,106,0)"/><stop offset="71%" stop-color="rgb(255,0,0)"/><stop offset="74%" stop-color="rgb(255,0,0)"/><stop offset="77%" stop-color="rgb(255,0,0)"/><stop offset="81%" stop-color="rgb(255,0,0)"/><stop offset="84%" stop-color="rgb(255,0,0)"/><stop offset="87%" stop-color="rgb(255,0,0)"/><stop offset="90%" stop-color="rgb(255,0,0)"/><stop offset="94%" stop-color="rgb(255,0,0)"/><stop offset="97%" stop-color="rgb(255,0,0)"/><stop offset="100%" stop-color="rgb(255,0,0)"/></linearGradient></defs>
+          <line x1="50" y1="31" x2="50" y2="314" stroke="#3a424d"/>
+          <line x1="50" y1="314" x2="559" y2="314" stroke="#3a424d"/>
+          <rect x="50" y="319" width="509" height="8" rx="2" fill="url(#specg)" opacity="0.9"/>
+          <g fill="#7d8794" font-size="14" text-anchor="middle">
+            <text x="67" y="342">400</text><text x="231" y="342">500</text><text x="395" y="342">600</text><text x="559" y="342">700</text>
+            <text x="300" y="356">wavelength λ (nm)</text>
+          </g>
+          <polyline fill="none" stroke="#5c7cfa" stroke-width="2.5" points="50.4,311.8 58.6,307.7 66.8,298.4 75.0,279.9 83.3,249.0 91.5,207.4 99.6,161.8 107.9,125.0 116.0,89.0 124.2,60.7 132.5,36.1 140.6,36.0 148.9,46.2 157.1,72.8 165.2,93.5 173.5,107.2 181.7,133.0 190.0,169.4 198.1,204.8 206.3,232.9 214.6,254.9 222.7,269.3 231.0,279.9 239.2,289.4 247.3,297.4 255.6,302.4 263.8,306.2 272.0,309.0 280.2,311.0 288.4,312.1 296.6,312.9 304.9,313.6 313.0,313.8 321.2,314.0 329.4,314.3 337.6,314.3 345.8,314.3 354.0,314.4 559.2,314.4"/>
+          <polyline fill="none" stroke="#51cf66" stroke-width="2.5" points="50.4,314.3 58.6,314.2 66.8,313.8 75.0,313.1 83.3,312.0 91.5,310.3 99.6,308.4 107.9,306.1 116.0,303.4 124.2,300.0 132.5,296.3 140.6,293.2 148.9,290.0 157.1,287.1 165.2,281.8 173.5,274.1 181.7,265.3 190.0,256.6 198.1,248.6 206.3,239.7 214.6,226.7 222.7,207.0 231.0,184.2 239.2,154.6 247.3,125.6 255.6,98.4 263.8,79.2 272.0,63.2 280.2,50.8 288.4,41.2 296.6,36.6 304.9,36.0 313.0,41.6 321.2,47.3 329.4,58.2 337.6,70.6 345.8,87.2 354.0,107.8 362.3,129.8 370.5,152.2 378.6,174.9 386.9,196.4 395.0,216.8 403.3,235.8 411.5,252.2 419.7,266.3 427.9,278.8 436.2,289.8 444.4,296.7 452.5,301.8 460.8,305.6 469.0,308.3 477.2,310.2 485.4,311.4 493.6,312.4 501.8,313.0 510.0,313.4 518.2,313.7 526.6,313.9 534.6,314.0 542.8,314.2 551.0,314.3"/>
+          <polyline fill="none" stroke="#ff6b6b" stroke-width="2.5" points="50.4,314.3 58.6,314.2 66.8,313.7 75.0,313.1 83.3,312.0 91.5,310.7 99.6,309.3 107.9,308.0 116.0,306.7 124.2,305.0 132.5,303.2 140.6,301.9 148.9,300.5 157.1,299.0 165.2,296.4 173.5,292.0 181.7,286.7 190.0,281.3 198.1,275.0 206.3,266.3 214.6,254.0 222.7,238.2 231.0,218.9 239.2,199.4 247.3,181.4 255.6,166.2 263.8,151.7 272.0,140.5 280.2,131.2 288.4,124.7 296.6,119.6 304.9,113.9 313.0,109.6 321.2,103.6 329.4,100.0 337.6,102.2 345.8,108.5 354.0,113.9 362.3,121.6 370.5,133.8 378.6,148.2 386.9,165.8 395.0,185.8 403.3,207.6 411.5,230.4 419.7,254.0 427.9,277.1 436.2,298.4 444.4,310.2 452.5,313.6 460.8,313.9 469.0,314.2 477.2,314.3 485.4,314.3 493.6,314.3 501.8,314.3 510.0,314.3 518.2,314.3 526.6,314.3 534.6,314.3 542.8,314.3 551.0,314.3 559.2,314.3"/>
+          <text x="10" y="24" fill="#7d8794" font-size="17">Sₖ(λ)</text>
+          <text x="130" y="26" fill="#5c7cfa" font-size="17" font-weight="bold">S</text>
+          <text x="294" y="26" fill="#51cf66" font-size="17" font-weight="bold">M</text>
+          <text x="350" y="26" fill="#ff6b6b" font-size="17" font-weight="bold">L</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- P3 perception: chromatic adaptation -->
+  <section class="slide">
+    <div class="kicker">Perception primer · 3 / 3</div>
+    <div class="two">
+      <div>
+        <h2>Your eye discounts the illuminant</h2>
+        <p>A white page looks white under <span style="color:#9cc2ff">noon daylight</span> and under <span style="color:#ffb86b">warm tungsten</span> — even though the spectra hitting your retina are wildly different. This is <strong>chromatic adaptation</strong> (color constancy).</p>
+        <p style="color:var(--muted);font-size:16px">Same idea, two names: <strong>white balance</strong> in a camera, and the <strong>white point</strong> + Bradford adaptation that maps sRGB’s D65 to the ICC profile’s D50 in our engineering section.</p>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <svg viewBox="0 0 280 212" width="100%" style="max-width:300px">
+          <rect x="10" y="20" width="110" height="70" rx="8" fill="#6f9fe0"/>
+          <rect x="160" y="20" width="110" height="70" rx="8" fill="#e8a45c"/>
+          <text x="30" y="108" font-family="monospace" font-size="14" fill="#9cc2ff">daylight SPD</text>
+          <text x="180" y="108" font-family="monospace" font-size="14" fill="#ffb86b">tungsten SPD</text>
+          <path d="M65 130 L120 158" stroke="#3a424d"/><path d="M215 130 L160 158" stroke="#3a424d"/>
+          <rect x="115" y="156" width="50" height="34" rx="5" fill="#f4f4f0"/>
+          <text x="140" y="205" text-anchor="middle" font-family="monospace" font-size="14" fill="#e6edf3">= white</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIVIDER: Part II What RGB really means -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part II</div>
+      <h1>What RGB<br>really means</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">Primaries, white points, and the gamut that give a triple its color.</p>
+    </div>
+  </section>
+
+  <!-- HOOK engineering kickoff -->
+  <section class="slide">
+    <div class="kicker">From perception to engineering</div>
+    <h2 style="margin-bottom:.3em">You open an image. You read a pixel.</h2>
+    <div style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;margin:.2em 0 .4em">
+      <div style="font-family:monospace;font-size:clamp(26px,4.6cqw,56px);font-weight:700;letter-spacing:.02em">
+        <span class="tag-r">R 235</span> <span class="tag-g">G 123</span> <span class="tag-b">B 85</span>
+      </div>
+      <div style="width:120px;height:90px;border-radius:14px;background:rgb(235,123,85);border:1px solid var(--line)"></div>
+    </div>
+    <h1 style="font-size:clamp(28px,4.4cqw,58px);color:var(--gold)">What does that <em class="hl" style="color:#fff">mean</em>?</h1>
+    <p class="lead">Three integers carry <strong>no color</strong> by themselves. To turn them into a real spectrum of light you silently assume primaries, a white point, an encoding curve, a connection space… Your screen is showing you <em class="hl">an</em> answer right now — only because it guessed <strong>sRGB</strong>. Let's unpack every assumption.</p>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <div class="kicker">The core problem</div>
+    <div class="two">
+      <div>
+        <h2>“Red = (1, 0, 0)” is meaningless</h2>
+        <p>RGB triples are just a <strong>recipe</strong> — “how much of each ingredient.” But a recipe is useless until you say what the ingredients <em class="hl">are</em>.</p>
+        <p>Until you pin down <strong>which</strong> red, which green, which blue, the same numbers can produce wildly different colors on different devices.</p>
+      </div>
+      <div class="card">
+        <p style="margin:0 0 14px;color:var(--muted);font-size:15px">Same recipe, two “reds”:</p>
+        <div style="display:flex;gap:16px;align-items:center">
+          <div style="flex:1;height:90px;border-radius:12px;background:#e23b3b"></div>
+          <div style="color:var(--muted);font-size:28px">≠</div>
+          <div style="flex:1;height:90px;border-radius:12px;background:#c0152a"></div>
+        </div>
+        <p style="margin:14px 0 0;font-size:13px;color:var(--muted)">(1,0,0) in two color spaces → two different physical colors.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- XYZ space -->
+  <section class="slide">
+    <div class="kicker">A space built to model the cones</div>
+    <div class="two">
+      <div>
+        <h2>CIE XYZ — the master space</h2>
+        <p>We can't read cones per pixel, so in 1931 the CIE fixed <strong>XYZ</strong>: a <em class="hl">linear transform of the LMS responses</em>, designed so that</p>
+        <ul class="bul" style="font-size:15px">
+          <li>all three functions stay <strong>≥ 0</strong> (no negative light);</li>
+          <li><strong>Y is luminance</strong> — perceived brightness;</li>
+          <li>it is <strong>device-independent</strong>: the hub every space converts through.</li>
+        </ul>
+        <div class="eq" data-latex="\begin{bmatrix} X \\ Y \\ Z \end{bmatrix} = \mathbf{M} \begin{bmatrix} L \\ M \\ S \end{bmatrix}, \qquad X = \int E(\lambda)\,R(\lambda)\,\bar{x}(\lambda)\, d\lambda"></div>
+        <p style="font-size:15px;color:var(--muted)">The curves <span class="tag-r">x̄</span>, <span class="tag-g">ȳ</span>, <span class="tag-b">z̄</span> are the <strong>colour-matching functions</strong> — the standard observer's S<sub>k</sub>(λ).</p>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <svg viewBox="0 0 576 360" width="100%" style="max-width:560px" font-family="monospace">
+          <defs><linearGradient id="specg2" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgb(117,0,255)"/><stop offset="6%" stop-color="rgb(115,0,255)"/><stop offset="13%" stop-color="rgb(108,0,255)"/><stop offset="19%" stop-color="rgb(81,0,255)"/><stop offset="23%" stop-color="rgb(26,0,255)"/><stop offset="26%" stop-color="rgb(0,45,255)"/><stop offset="29%" stop-color="rgb(0,136,255)"/><stop offset="32%" stop-color="rgb(0,232,251)"/><stop offset="35%" stop-color="rgb(0,255,216)"/><stop offset="39%" stop-color="rgb(0,255,100)"/><stop offset="45%" stop-color="rgb(0,255,0)"/><stop offset="55%" stop-color="rgb(169,255,0)"/><stop offset="58%" stop-color="rgb(255,255,0)"/><stop offset="61%" stop-color="rgb(255,232,0)"/><stop offset="65%" stop-color="rgb(255,172,0)"/><stop offset="68%" stop-color="rgb(255,106,0)"/><stop offset="71%" stop-color="rgb(255,0,0)"/><stop offset="74%" stop-color="rgb(255,0,0)"/><stop offset="77%" stop-color="rgb(255,0,0)"/><stop offset="81%" stop-color="rgb(255,0,0)"/><stop offset="84%" stop-color="rgb(255,0,0)"/><stop offset="87%" stop-color="rgb(255,0,0)"/><stop offset="90%" stop-color="rgb(255,0,0)"/><stop offset="94%" stop-color="rgb(255,0,0)"/><stop offset="97%" stop-color="rgb(255,0,0)"/><stop offset="100%" stop-color="rgb(255,0,0)"/></linearGradient></defs>
+          <line x1="50" y1="31" x2="50" y2="314" stroke="#3a424d"/>
+          <line x1="50" y1="314" x2="559" y2="314" stroke="#3a424d"/>
+          <rect x="50" y="319" width="509" height="8" rx="2" fill="url(#specg2)" opacity="0.9"/>
+          <g fill="#7d8794" font-size="16" text-anchor="middle">
+            <text x="67" y="342">400</text><text x="231" y="342">500</text><text x="395" y="342">600</text><text x="559" y="342">700</text>
+            <text x="300" y="356">wavelength λ (nm)</text>
+          </g>
+          <polyline fill="none" stroke="#5c7cfa" stroke-width="2.5" points="50.4,311.3 58.6,308.8 66.8,303.8 75.0,297.2 83.3,282.0 91.5,256.4 99.6,213.6 107.9,152.2 116.0,98.0 124.2,61.0 132.5,41.5 140.6,36.0 148.9,37.7 157.1,42.0 165.2,53.8 173.5,75.7 181.7,113.3 190.0,147.4 198.1,187.4 206.3,218.2 214.6,242.2 222.7,259.2 231.0,271.9 239.2,284.3 247.3,293.0 255.6,299.0 263.8,303.0 272.0,305.4 280.2,307.3 288.4,308.5 296.6,309.4 304.9,309.9 313.0,310.2 321.2,310.4 329.4,310.5 337.6,310.6 345.8,310.6 354.0,310.7 362.3,310.7 370.5,310.8 378.6,310.8 386.9,310.8 395.0,310.9 403.3,310.9 411.5,310.9 419.7,311.0 427.9,311.0 436.2,311.0 444.4,311.0 452.5,311.0 460.8,311.0 469.0,311.0 477.2,311.0 485.4,311.0 493.6,311.0 501.8,311.0 510.0,311.0 518.2,311.0 526.6,311.0 534.6,311.0 542.8,311.0 551.0,311.0 559.2,311.0"/>
+          <polyline fill="none" stroke="#51cf66" stroke-width="2.5" points="50.4,314.4 58.6,314.3 66.8,314.3 75.0,314.3 83.3,314.0 91.5,313.8 99.6,313.3 107.9,312.4 116.0,311.2 124.2,309.7 132.5,308.0 140.6,306.1 148.9,303.7 157.1,301.7 165.2,298.7 173.5,295.1 181.7,290.3 190.0,284.6 198.1,278.0 206.3,270.4 214.6,258.5 222.7,242.8 231.0,224.8 239.2,204.4 247.3,182.4 255.6,160.8 263.8,141.6 272.0,123.6 280.2,107.4 288.4,93.0 296.6,80.4 304.9,69.7 313.0,61.4 321.2,55.4 329.4,51.8 337.6,50.6 345.8,51.8 354.0,55.4 362.3,61.7 370.5,70.6 378.6,82.3 386.9,96.7 395.0,113.5 403.3,132.7 411.5,154.0 419.7,177.2 427.9,202.0 436.2,228.0 444.4,254.6 452.5,281.0 460.8,300.2 469.0,310.2 477.2,313.0 485.4,313.8 493.6,314.2 501.8,314.3 510.0,314.4 518.2,314.4 526.6,314.4 534.6,314.4 542.8,314.4 551.0,314.4 559.2,314.4"/>
+          <polyline fill="none" stroke="#ff6b6b" stroke-width="2.5" points="50.4,313.3 58.6,312.4 66.8,310.7 75.0,308.2 83.3,303.0 91.5,294.0 99.6,279.1 107.9,258.1 116.0,240.0 124.2,228.4 132.5,223.1 140.6,223.2 148.9,226.3 157.1,230.9 165.2,238.2 173.5,248.6 181.7,262.8 190.0,277.3 198.1,291.3 206.3,301.8 214.6,307.0 222.7,308.2 231.0,307.8 239.2,306.0 247.3,303.3 255.6,299.8 263.8,295.4 272.0,290.2 280.2,284.2 288.4,277.4 296.6,269.8 304.9,261.4 313.0,252.2 321.2,242.2 329.4,231.4 337.6,219.8 345.8,207.4 354.0,194.2 362.3,180.2 370.5,165.4 378.6,149.8 386.9,133.4 395.0,116.2 403.3,98.2 411.5,79.4 419.7,59.8 427.9,39.4 436.2,36.0 444.4,40.3 452.5,51.6 460.8,68.4 469.0,91.1 477.2,119.6 485.4,154.4 493.6,194.6 501.8,238.8 510.0,285.0 518.2,311.0 526.6,313.8 534.6,314.4 542.8,314.4 551.0,314.4 559.2,314.4"/>
+          <text x="122" y="24" fill="#5c7cfa" font-size="20" font-weight="bold">z̄</text>
+          <text x="307" y="24" fill="#51cf66" font-size="20" font-weight="bold">ȳ</text>
+          <text x="400" y="24" fill="#ff6b6b" font-size="20" font-weight="bold">x̄</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- xyY horseshoe -->
+  <section class="slide">
+    <div class="kicker">From XYZ to a 2-D map of colour</div>
+    <h2 style="margin-bottom:.2em">Normalise out brightness → the chromaticity horseshoe</h2>
+    <div style="display:flex;gap:1.5cqw;align-items:center;justify-content:center;flex-wrap:wrap">
+      <figure style="margin:0;text-align:center">
+        <video src="xyY_solid.mp4" autoplay loop muted playsinline style="max-height:46cqh;max-width:100%;border-radius:10px;border:1px solid var(--line)"></video>
+        <figcaption style="font-size:15px;color:var(--muted);margin-top:4px">xyY: Y up, chromaticity on the floor</figcaption>
+      </figure>
+      <div style="font-size:30px;color:var(--muted)">→</div>
+      <figure style="margin:0;text-align:center">
+        <img src="horseshoe.png" alt="CIE 1931 chromaticity horseshoe with Planckian locus" style="max-height:46cqh;max-width:100%">
+        <figcaption style="font-size:15px;color:var(--muted);margin-top:4px">collapse Y → horseshoe + Planckian locus</figcaption>
+      </figure>
+    </div>
+    <p style="margin-top:.4em;font-size:clamp(14px,1.45cqw,20px)">Drop luminance — <span style="font-family:monospace">x = X/(X+Y+Z), y = Y/(X+Y+Z)</span> — and the 3-D solid flattens to the <strong>horseshoe</strong>: every physically realizable chromaticity, its curved edge the pure spectral colours. The <strong>Planckian locus</strong> threads through it (the whites of glowing blackbodies — D65, D50…). These are <em class="hl">physical</em> colours; now we must decide where an image's <span class="tag-r">max R</span>, <span class="tag-g">max G</span>, <span class="tag-b">max B</span> land on this map — its <strong>primaries</strong>.</p>
+  </section>
+
+  <!-- 4b interactive gamut -->
+  <section class="slide">
+    <div class="kicker">Interactive · CIE 1931 xy</div>
+    <h2 style="margin-bottom:.4em">Compare gamuts on the chromaticity diagram</h2>
+    <div class="iv">
+      <div style="display:flex;justify-content:center">
+        <canvas id="gamutCanvas" class="diagram" width="480" height="452"></canvas>
+      </div>
+      <div class="controls">
+        <p style="font-size:16px;margin:0 0 6px"><strong>A gamut is the triangle spanned by the three primaries</strong> — every colour the space can encode lives inside it. Push a corner outward (sRGB → Adobe green) and the triangle covers more of the spectrum.</p>
+        <p style="font-size:14px;color:var(--muted);max-width:44ch;margin:0 0 4px">
+          The horseshoe is the <strong>spectral locus</strong> — every monochromatic wavelength, 380–700&nbsp;nm — so it bounds all physical colours.
+        </p>
+        <label class="chk"><input type="checkbox" data-g="srgb" checked><span class="swatchkey" style="background:#fff"></span> sRGB / Rec.709</label>
+        <label class="chk"><input type="checkbox" data-g="p3"><span class="swatchkey" style="background:#ff7ab6"></span> Display&nbsp;P3 (DCI-P3 primaries)</label>
+        <label class="chk"><input type="checkbox" data-g="adobe"><span class="swatchkey" style="background:#ffd43b"></span> Adobe&nbsp;RGB (1998)</label>
+        <label class="chk"><input type="checkbox" data-g="rec2020"><span class="swatchkey" style="background:#51cf66"></span> Rec.&nbsp;2020</label>
+        <div id="coverage" class="mathout" style="margin-top:6px;line-height:1.9"></div>
+        <p style="font-size:12px;color:#586069;margin:2px 0 0">Fill is an sRGB-clamped rendering — true wide-gamut colors can't be shown on this display, which is exactly the point.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 white point -->
+  <section class="slide">
+    <div class="kicker">The white point</div>
+    <h2>Corners aren't enough — you must define <em class="hl">white</em></h2>
+    <p>You saw the achromatic centre of the horseshoe. Now: what happens when <strong>R = G = B = max</strong>? That's the <strong>white point</strong> (D65, D50, …).</p>
+    <ul class="bul">
+      <li>It sets the <strong>relative scaling</strong> of the three primaries.</li>
+      <li>It decides how much luminance each contributes…</li>
+      <li>…so equal amounts produce the <em class="hl">specified white</em> — not a color cast.</li>
+    </ul>
+  </section>
+
+  <!-- ILLUMINANTS -->
+  <section class="slide">
+    <div class="kicker">What "white" actually is</div>
+    <div class="two">
+      <div>
+        <h2>Illuminants: D50, D65 &amp; friends</h2>
+        <p>An illuminant is the <strong>spectrum of a light source</strong>, summarized by a chromaticity — a point on the <strong>Planckian locus</strong> you just saw. It pins down <strong>what the image calls "white"</strong> — the physical color produced when R = G = B.</p>
+        <ul class="bul" style="font-size:15px">
+          <li><strong>D65</strong> ~6504 K — sRGB, Rec.709, P3, most displays.</li>
+          <li><strong>D50</strong> ~5003 K — the ICC connection-space white; print / proofing (ISO 3664).</li>
+          <li><strong>A</strong> ~2856 K tungsten · <strong>E</strong> equal-energy. (Lower K = warmer, higher = cooler.)</li>
+        </ul>
+        <p style="font-size:15px"><strong>In a file</strong> the white point is not stored per pixel — it rides along in the <strong>color-space tag / ICC <code>wtpt</code></strong>. Untagged ⇒ sRGB ⇒ D65. It only <strong>does something</strong> when you change spaces: if source and destination whites differ (say D65→D50), you must <em class="hl">chromatically adapt</em> so neutrals stay neutral — that's a CAT (coming up).</p>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <svg viewBox="0 0 260 220" width="100%" style="max-width:300px">
+          <text x="6" y="16" fill="#7d8794" font-size="14" font-family="monospace">Planckian locus</text>
+          <path d="M40 170 Q120 60 230 50" fill="none" stroke="#586069" stroke-width="1.5"/>
+          <circle cx="70" cy="140" r="6" fill="#ffb86b"/><text x="82" y="144" fill="#ffb86b" font-size="14" font-family="monospace">A 2856K</text>
+          <circle cx="150" cy="92" r="6" fill="#fff4e8"/><text x="162" y="96" fill="#e6edf3" font-size="14" font-family="monospace">D50 5003K</text>
+          <circle cx="192" cy="74" r="6" fill="#eaf0ff"/><text x="150" y="60" fill="#9cc2ff" font-size="14" font-family="monospace">D65 6504K</text>
+          <text x="38" y="200" fill="#7d8794" font-size="14" font-family="monospace">warm  →→→→→→→  cool</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIVIDER: Part III Gamma and linear light -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part III</div>
+      <h1>Gamma &amp;<br>linear light</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">Why we bend the numbers to store them — and must straighten them before any math.</p>
+    </div>
+  </section>
+
+  <!-- TRANSFER FUNCTIONS eli5 -->
+  <section class="slide">
+    <div class="kicker">Gamma, explained like you're five</div>
+    <h2 style="margin-bottom:.35em">OETF, EOTF, OOTF</h2>
+    <p style="max-width:66ch">Light is <strong>linear</strong>: twice the photons = twice the value. But we don't <em>store</em> light linearly, because your eyes care far more about differences in the darks than in the brights. So we bend the numbers with a curve.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:.55em 0">
+      <div class="card">
+        <div style="font-weight:700;color:var(--gold)">OETF — “write it down”</div>
+        <p style="font-size:15px;margin:.4em 0 0"><b>O</b>pto→<b>E</b>lectronic, in the camera. Scene light → code values. Squishes a huge brightness range into 8 bits, spending more codes on darks. <span class="dim">(encoding)</span></p>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;color:var(--gold)">EOTF — “read it back”</div>
+        <p style="font-size:15px;margin:.4em 0 0"><b>E</b>lectronic→<b>O</b>ptical, in the display. Code values → light the screen emits. The sRGB ~2.2 curve, or PQ / HLG for HDR. <span class="dim">(decoding)</span></p>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;color:var(--gold)">OOTF — “the look”</div>
+        <p style="font-size:15px;margin:.4em 0 0">Scene→screen, end to end (EOTF∘OETF). On purpose <em class="hl">not</em> 1:1 — a ~1.2 system gamma adds contrast so images look right in a dim room. <span class="dim">(rendering)</span></p>
+      </div>
+    </div>
+    <p style="font-size:15px;color:var(--muted)">Engineering bite: 8-bit files are <strong>OETF-encoded</strong>. Before any math — matrices, blending, resizing, filtering — <strong>linearize with the EOTF first</strong>. Skip it and gradients band, edges darken, resizing halos. Here's what those squandered bits look like:</p>
+  </section>
+
+  <!-- BANDING reveal -->
+  <section class="slide">
+    <div class="kicker">Interactive · why we encode perceptually</div>
+    <h2 style="margin-bottom:.25em">The banding reveal — spend bits where the eye can see</h2>
+    <p style="font-size:15px;color:var(--muted);max-width:82ch;margin:0 0 8px">Same gradient, same bit budget. <strong>Perceptual</strong> encoding spends codes in the shadows, where your eye resolves fine steps; <strong>linear</strong> squanders them on highlights it can't tell apart. Drag the decode γ off its match → midtones shift and shadows band. Then look at the bottom strip: <strong>linear at the same bit depth</strong>.</p>
+    <div style="display:flex;gap:22px;align-items:center;font-size:13px;color:var(--muted);flex-wrap:wrap;margin-bottom:8px">
+      <label>quantization bits <input type="range" id="beBits" min="4" max="8" step="1" value="8" style="vertical-align:middle;accent-color:#58a6ff"> <span id="beBitsV" style="font-family:monospace;color:var(--gold)">8</span></label>
+      <label>decode γ <input type="range" id="beGamma" min="1.4" max="3.4" step="0.05" value="2.40" style="vertical-align:middle;accent-color:#ff6b6b"> <span id="beGammaV" style="font-family:monospace;color:var(--gold)">2.40</span> <span id="beMatch" style="color:#51cf66">✓ matched</span></label>
+    </div>
+    <canvas id="beCanvas" width="560" height="310" style="width:100%;max-width:640px;background:#0a0d12;border:1px solid #30363d;border-radius:10px"></canvas>
+  </section>
+
+  <!-- GAMMA vs LINEAR demo -->
+  <section class="slide">
+    <div class="kicker">The mistake everyone makes</div>
+    <h2 style="margin-bottom:.2em">Your editor has been <em class="hl">lying to you</em></h2>
+    <p style="font-size:15px;color:var(--muted);max-width:76ch;margin:0 0 12px">Blend, resize, blur, composite — <strong>all pixel math must happen in linear light</strong>. Do it in gamma-encoded sRGB and the result is <em class="hl">dark and wrong</em>.</p>
+    <canvas id="gammaDemo" width="600" height="360" style="width:100%;max-width:640px;background:#0a0d12;border:1px solid #30363d;border-radius:10px;display:block;margin:0 auto"></canvas>
+    <p style="font-size:13px;color:var(--muted);margin-top:10px;text-align:center">Every row: source pattern → average in <span style="color:#ff6b6b">γ-space</span> vs <span style="color:#51cf66">linear</span>. The γ result is what you get if your editor skips linearization.</p>
+  </section>
+
+  <!-- DIVIDER: Part IV The conversion matrix -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part IV</div>
+      <h1>The RGB ↔ XYZ<br>matrix</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">One 3×3 matrix turns a recipe into a real color — and back.</p>
+    </div>
+  </section>
+
+  <!-- SPACES common color spaces -->
+  <section class="slide">
+    <div class="kicker">The usual suspects</div>
+    <h2 style="margin-bottom:.3em">Common RGB spaces — same idea, different triangles</h2>
+    <p style="font-size:15px;color:var(--muted);margin-bottom:.3em">Now that we've met primaries, white points and encodings, the whole zoo is just those <strong>three knobs</strong> set differently:</p>
+    <table class="cmp">
+      <tr><th>Space</th><th>White</th><th>Gamut</th><th>Encoding</th><th>Where you meet it</th></tr>
+      <tr><td><b>sRGB</b> / Rec.709</td><td>D65</td><td>baseline (100%)</td><td>~2.2 piecewise</td><td>the web, most monitors, untagged files</td></tr>
+      <tr><td><b>Display P3</b></td><td>D65</td><td>~25% wider red/green</td><td>sRGB curve</td><td>Apple screens, phone cameras</td></tr>
+      <tr><td><b>Adobe RGB (1998)</b></td><td>D65</td><td>wider <span class="tag-g">greens / cyans</span></td><td>γ 2.199</td><td>photography, prepress</td></tr>
+      <tr><td><b>Rec.2020</b></td><td>D65</td><td>huge (near-spectral)</td><td>PQ / HLG (HDR)</td><td>UHD TV, HDR video</td></tr>
+      <tr><td><b>ProPhoto RGB</b></td><td>D50</td><td>enormous (imaginary primaries)</td><td>γ 1.8</td><td>raw editing headroom</td></tr>
+    </table>
+    <p style="margin-top:.5em">Wider primaries cover more colors — but each code value now spans a bigger color step, so 8 bits buy less precision (<strong>banding risk</strong>). That's why wide-gamut workflows lean on 16-bit.</p>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <div class="kicker">The mechanism</div>
+    <h2>The RGB → XYZ matrix</h2>
+    <p>We have the primaries (their <strong>(x, y)</strong>) and the white point. Now build the map from an image's linear RGB into the shared <strong>XYZ</strong> hub. Each primary’s (x, y) plus its implied <strong>z = 1 − x − y</strong> gives a direction in XYZ; assemble them and solve for the scaling factors that make white come out right:</p>
+    <div class="eq" data-latex="\begin{bmatrix} X \\ Y \\ Z \end{bmatrix} = \begin{bmatrix} \color{#ff6b6b}{x_r} & \color{#51cf66}{x_g} & \color{#5c7cfa}{x_b} \\ \color{#ff6b6b}{y_r} & \color{#51cf66}{y_g} & \color{#5c7cfa}{y_b} \\ \color{#ff6b6b}{z_r} & \color{#51cf66}{z_g} & \color{#5c7cfa}{z_b} \end{bmatrix} \begin{bmatrix} \color{#ffd43b}{S_r} \cdot R \\ \color{#ffd43b}{S_g} \cdot G \\ \color{#ffd43b}{S_b} \cdot B \end{bmatrix}"></div>
+    <p>The scaling factors <em class="hl">(S_r, S_g, S_b)</em> are chosen so that R=G=B=1 maps exactly to the white point. Fold them in → one fixed <strong>3×3 matrix</strong> per color space.</p>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <div class="kicker">sRGB, concretely</div>
+    <h2>The folded matrix</h2>
+    <p class="lead">For sRGB (adapted to D50 for the profile connection space), it’s approximately:</p>
+<div class="eq" data-latex="\begin{aligned} X &= 0.4360\,R + 0.3851\,G + 0.1431\,B \\ \color{#ffd43b}{Y} &= \color{#ffd43b}{0.2225\,R + 0.7169\,G + 0.0606\,B} \\ Z &= 0.0139\,R + 0.0971\,G + 0.7139\,B \end{aligned}"></div>
+    <p>The middle row is the <strong>luminance equation</strong>. Note the coefficients: <span class="tag-g">green ≈ 0.72</span> dominates — which is precisely <em class="hl">why green looks brightest</em> to the eye.</p>
+    <p style="font-size:15px;color:var(--muted)">Target <strong>D65</strong> instead (native sRGB, no print adaptation) and the same primaries give the canonical matrix — e.g. <span style="font-family:monospace;color:#c9d1d9">Y = 0.2126 R + 0.7152 G + 0.0722 B</span>. The two versions differ only because the D50 one has a <strong>Bradford adaptation</strong> folded in — a <strong>chromatic adaptation transform</strong>, which we unpack a few slides on.</p>
+  </section>
+
+  <!-- 7b live math -->
+  <section class="slide">
+    <div class="kicker">Interactive · linear RGB → XYZ</div>
+    <h2 style="margin-bottom:.4em">Run the pipeline live</h2>
+    <div class="iv">
+      <div class="controls">
+        <div class="slider"><span class="tag-r">R</span><input type="range" min="0" max="255" value="158" id="cR" class="rng-r"><span class="bignum" id="cRv">158</span></div>
+        <div class="slider"><span class="tag-g">G</span><input type="range" min="0" max="255" value="92"  id="cG" class="rng-g"><span class="bignum" id="cGv">92</span></div>
+        <div class="slider"><span class="tag-b">B</span><input type="range" min="0" max="255" value="40"  id="cB" class="rng-b"><span class="bignum" id="cBv">40</span></div>
+        <div style="display:flex;align-items:center;gap:12px;margin:2px 0 2px">
+          <span style="font-size:14px;color:var(--muted)">Source space</span>
+          <select class="spc" id="cSpace">
+            <option value="srgb">sRGB (D65)</option>
+            <option value="p3">Display P3 (D65)</option>
+            <option value="adobe">Adobe RGB (D65)</option>
+          </select>
+          <span style="font-size:13px;color:var(--muted);margin-left:auto">color</span>
+          <span id="cSwatch" style="width:46px;height:30px;border-radius:8px;border:1px solid var(--line)"></span>
+        </div>
+        <div id="calcOut" class="mathout"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+        <canvas id="calcCanvas" class="diagram" width="424" height="404"></canvas>
+        <p style="font-size:13px;color:var(--muted);margin:0">The ring is your pixel’s chromaticity (x, y), inside the source gamut.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIVIDER: Part V Chromatic adaptation -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part V</div>
+      <h1>Chromatic<br>adaptation</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">Re-expressing a color under a different white so neutrals stay neutral.</p>
+    </div>
+  </section>
+
+  <!-- CAT chromatic adaptation transforms -->
+  <section class="slide">
+    <div class="kicker">Moving between whites</div>
+    <h2 style="margin-bottom:.35em">Chromatic adaptation transforms (CAT)</h2>
+    <p style="max-width:70ch">To re-express a color under a <strong>different white</strong> (D65→D50) so neutrals stay neutral, you scale it in a <strong>cone-like space</strong> — von&nbsp;Kries' idea: one gain per channel, set by the ratio of the two whites.</p>
+    <div class="two" style="margin-top:.3em">
+      <div>
+        <p style="font-weight:700;margin-bottom:.3em">From a JPEG pixel — you can't adapt 8-bit RGB directly:</p>
+        <ol class="bul" style="font-size:14.5px">
+          <li>8-bit R′G′B′ → <strong>linear RGB</strong> &nbsp;<span class="dim">(EOTF)</span></li>
+          <li>linear RGB → <strong>XYZ</strong> &nbsp;<span class="dim">(source primary matrix)</span></li>
+          <li>XYZ → <strong>cone space</strong> LMS &nbsp;<span class="dim">(CAT matrix M)</span></li>
+          <li><strong>scale</strong> each cone by white ratio &nbsp;<span class="dim">(von Kries)</span></li>
+          <li>LMS → XYZ → linear RGB &nbsp;<span class="dim">(M⁻¹, dest. matrix)</span></li>
+          <li>linear RGB → 8-bit &nbsp;<span class="dim">(OETF)</span></li>
+        </ol>
+      </div>
+      <div>
+        <div class="eq" data-latex="\begin{aligned} (\rho,\gamma,\beta)^\top &= M\,XYZ_w \\[2pt] XYZ_\text{dst} &= M^{-1}\operatorname{diag}\!\Big(\tfrac{\rho_\text{dst}}{\rho_\text{src}},\tfrac{\gamma_\text{dst}}{\gamma_\text{src}},\tfrac{\beta_\text{dst}}{\beta_\text{src}}\Big)\,M\;XYZ_\text{src} \end{aligned}"></div>
+        <p style="font-size:14.5px;margin-top:.5em">The methods differ <em class="hl">only in the matrix M</em>:</p>
+        <ul class="bul" style="font-size:14.5px">
+          <li><strong>Von Kries</strong> — actual LMS cone fundamentals. Oldest, simplest, least accurate.</li>
+          <li><strong>Bradford</strong> — “sharpened” cones fit to data. The ICC / Photoshop default.</li>
+          <li><strong>CMCCAT2000 · CAT02 · CAT16</strong> — refined matrices + a degree-of-adaptation factor D; CAT16 (in CIECAM16) is the current standard.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- CAT demo on a real image -->
+  <section class="slide">
+    <div class="kicker">CAT · seeing it</div>
+    <h2 style="margin-bottom:.25em">Moving the adopted white, on a real image</h2>
+    <p style="font-size:15px;color:var(--muted);max-width:88ch;margin:0 0 8px">The same sRGB photo, Bradford-adapted from its D65 white to two others. The neutrals — grey stone, road, sky — drift toward each illuminant's cast: a gentle warm-up for <strong>D50</strong>, a dramatic tungsten orange for <strong>A</strong>. The further the destination white sits from D65, the bigger the shift.</p>
+    <div style="display:flex;gap:1cqw;align-items:flex-start;justify-content:center;flex-wrap:wrap">
+      <figure style="margin:0;text-align:center;width:31%;min-width:230px">
+        <img src="lvsn_D65.jpg" alt="original D65" style="width:100%;border-radius:8px;border:1px solid var(--line)">
+        <figcaption style="font-size:14px;color:var(--muted);margin-top:4px">D65 — original</figcaption>
+      </figure>
+      <figure style="margin:0;text-align:center;width:31%;min-width:230px">
+        <img src="lvsn_D50.jpg" alt="adapted to D50" style="width:100%;border-radius:8px;border:1px solid var(--line)">
+        <figcaption style="font-size:14px;color:var(--muted);margin-top:4px">→ D50 (~5000 K, warm)</figcaption>
+      </figure>
+      <figure style="margin:0;text-align:center;width:31%;min-width:230px">
+        <img src="lvsn_A.jpg" alt="adapted to illuminant A" style="width:100%;border-radius:8px;border:1px solid var(--line)">
+        <figcaption style="font-size:14px;color:var(--muted);margin-top:4px">→ A (2856 K, tungsten)</figcaption>
+      </figure>
+    </div>
+    <p style="font-size:13px;color:#586069;margin-top:8px;text-align:center">Bradford CAT, D65 → destination white — the exact transform from the previous slide, applied per pixel.</p>
+  </section>
+
+  <!-- DIVIDER: Part VI ICC profiles -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part VI</div>
+      <h1>ICC profiles</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">The matrix, tone curves, and white point — color meaning written to disk.</p>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <div class="kicker">Where ICC profiles fit</div>
+    <h2>A profile literally <em class="hl">stores</em> this matrix</h2>
+    <div class="two">
+      <div>
+        <p>A matrix-based ICC profile is just these pieces written to disk:</p>
+        <ul class="bul">
+          <li><code class="tag-r">rXYZ</code> <code class="tag-g">gXYZ</code> <code class="tag-b">bXYZ</code> — the XYZ of each primary at full intensity (the matrix columns).</li>
+          <li><code>rTRC / gTRC / bTRC</code> — the per-channel tone curves (gamma).</li>
+          <li>The <strong>white point</strong>.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p style="margin:0 0 10px;color:var(--muted);font-size:14px">profile.icc</p>
+        <pre style="border:none;padding:0;background:none;font-size:14px">wtpt → <span class="dim">D50</span>
+rXYZ → <span class="tag-r">0.436 0.222 0.014</span>
+gXYZ → <span class="tag-g">0.385 0.717 0.097</span>
+bXYZ → <span class="tag-b">0.143 0.061 0.714</span>
+rTRC → <span class="dim">γ curve</span>
+gTRC → <span class="dim">γ curve</span>
+bTRC → <span class="dim">γ curve</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ICC anatomy -->
+  <section class="slide">
+    <div class="kicker">The container</div>
+    <div class="two">
+      <div>
+        <h2>Anatomy of an ICC profile</h2>
+        <p>A profile is a small binary that says <strong>“here's how my device's numbers map to absolute color.”</strong> Two flavors:</p>
+        <ul class="bul" style="font-size:16px">
+          <li><strong>Matrix / TRC</strong> — primaries + white + per-channel curves. Tiny (≈0.5–3 KB), exact for additive RGB. (sRGB, Adobe RGB.)</li>
+          <li><strong>LUT-based</strong> (A2B / B2A) — big multi-dimensional lookup tables for printers &amp; scanners whose behavior isn't a clean matrix.</li>
+        </ul>
+        <p style="font-size:15px">Everyone meets in the <strong>PCS</strong> (Profile Connection Space): CIE <strong>XYZ or Lab, always at D50</strong>. <strong>Rendering intents</strong> — perceptual, relative / absolute colorimetric, saturation — decide how out-of-gamut colors get squeezed in.</p>
+      </div>
+      <div class="card">
+        <p style="margin:0 0 8px;color:var(--muted);font-size:14px">required tags · matrix/TRC</p>
+        <pre style="border:none;padding:0;background:none;font-size:13px">'desc'  profile name
+'wtpt'  media white       <span class="dim">→ D50</span>
+'rXYZ' 'gXYZ' 'bXYZ'   primaries <span class="dim">(D50)</span>
+'rTRC' 'gTRC' 'bTRC'   tone curves
+'cprt'  copyright
+<span class="dim">header: class=mntr space=RGB pcs=XYZ</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ICC python -->
+  <section class="slide">
+    <div class="kicker">Engineering · icc.py</div>
+    <h2 style="margin-bottom:.3em">Build a custom ICC profile in Python</h2>
+    <div class="two">
+      <div>
+        <p style="font-size:15px;margin-bottom:.5em">A matrix/TRC profile is <em class="hl">just numbers</em>: compute the primaries→XYZ matrix, Bradford-adapt to D50, write the tags — no CMS library needed. Then hand the bytes to Pillow.</p>
+        <pre style="font-size:12.5px">M = rgb_to_xyz_matrix(primaries, white)
+M = adapt_to_d50(M, white)          <span class="dim"># Bradford</span>
+tags = [wtpt(D50), rXYZ(M[:,0]),
+        gXYZ(M[:,1]), bXYZ(M[:,2]),
+        rTRC(γ), gTRC(γ), bTRC(γ)]
+icc = header + tag_table + tags     <span class="dim"># a valid .icc</span>
+
+img.save("out.png", icc_profile=icc)</pre>
+      </div>
+      <div class="card">
+        <p style="margin:0 0 8px;color:var(--muted);font-size:14px">same triple, two profiles → Pillow / LittleCMS</p>
+        <pre style="border:none;padding:0;background:none;font-size:13px">read (<span class="tag-r">235</span>,<span class="tag-g">123</span>,<span class="tag-b">85</span>) as…
+
+sRGB-like   → sRGB <span class="dim">(236, 124, 84)</span>
+Adobe-like  → sRGB <span class="tag-y">(255, 124, 82)</span>
+                   <span class="dim">↑ red clips — out of sRGB gamut</span></pre>
+        <p style="font-size:13px;color:var(--muted);margin:10px 0 0">Identical bytes on disk, different real colors — the profile <strong>is</strong> the meaning. &nbsp;<code>python icc.py</code></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIVIDER: demo icc.py -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Live demo</div>
+      <h1><code>icc.py</code></h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">Build a matrix/TRC ICC profile from scratch — no CMS library — then tag the same RGB bytes two ways and watch the color change.</p>
+      <a class="divider-link" href="icc.py" target="_blank" rel="noopener">Open icc.py →</a>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <div class="kicker">The pipeline</div>
+    <h2>“Taking primaries into account” = applying the matrix</h2>
+    <ol class="bul" style="counter-reset:step">
+      <li><strong>Linearize</strong> the gamma-encoded R′G′B′ using the TRCs → linear RGB.</li>
+      <li><strong>Multiply</strong> by the primary matrix → XYZ (in the connection space).</li>
+      <li><strong>Multiply</strong> by the <em class="hl">inverse</em> matrix of the destination profile → that device’s RGB.</li>
+    </ol>
+    <p>The two triangles — source gamut and destination gamut — generally differ. Step 3 is where <strong>out-of-gamut colors</strong> get handled by the rendering intent.</p>
+    <p style="font-size:15px;color:var(--muted)"><strong>Who does this?</strong> Software, not the panel. The OS/app <strong>color-management module on the CPU/GPU</strong> — ColorSync (macOS), Windows ICM, or the browser/Qt/Skia — converts source→display profile <em>before</em> sending pixels out. The <strong>display</strong> just emits per its fixed EOTF (plus an optional hardware-calibration LUT in the monitor or GPU). Skip color management and the matrix is simply never applied — the file's raw numbers hit an assumed-sRGB screen.</p>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <div class="kicker">The intuition</div>
+    <div class="two">
+      <div>
+        <h2>Every pixel is a recipe</h2>
+        <p>“62% red-primary, 30% green-primary, 8% blue-primary.”</p>
+        <ul class="bul">
+          <li>The <strong>chromaticities</strong> say what the ingredients are.</li>
+          <li>The <strong>matrix</strong> mixes them into a real color.</li>
+          <li>Converting spaces <em class="hl">re-expresses that same real color</em> as a recipe in another device’s ingredients.</li>
+        </ul>
+      </div>
+      <div class="recipe card">
+        <p style="margin:0 0 4px;color:var(--muted);font-size:14px">One pixel’s recipe</p>
+        <div class="bar" style="background:#ff6b6b;width:100%">R · 62%</div>
+        <div class="bar" style="background:#51cf66;width:62%">G · 30%</div>
+        <div class="bar" style="background:#5c7cfa;width:30%;color:#fff">B · 8%</div>
+        <div style="height:54px;border-radius:10px;margin-top:8px;background:rgb(190,150,70);display:flex;align-items:center;justify-content:center;color:#0d1117;font-weight:700">= one real color</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide">
+    <div class="kicker">Why tagging matters</div>
+    <h2>Change the primaries, <em class="hl">keep the recipe</em> → wrong color</h2>
+    <p>The same triple yields a <strong>different physical color</strong> when the primaries change. That’s why an <strong>untagged Adobe RGB photo shown as sRGB looks wrong</strong>: the viewer mixes the right recipe with the wrong ingredients.</p>
+    <div style="display:flex;gap:24px;margin-top:10px;flex-wrap:wrap">
+      <div style="text-align:center">
+        <div style="width:150px;height:100px;border-radius:12px;background:#1f8f4e"></div>
+        <p style="font-size:13px;color:var(--muted);margin-top:8px">Intended (Adobe RGB)</p>
+      </div>
+      <div style="display:flex;align-items:center;font-size:30px;color:var(--muted)">→</div>
+      <div style="text-align:center">
+        <div style="width:150px;height:100px;border-radius:12px;background:#46b06e"></div>
+        <p style="font-size:13px;color:var(--muted);margin-top:8px">Misread as sRGB</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIVIDER: Part VII The bigger picture -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part VII</div>
+      <h1>The bigger<br>picture</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">Appearance models and the full solid of every color that can exist.</p>
+    </div>
+  </section>
+
+  <!-- CIECAM16 -->
+  <section class="slide">
+    <div class="kicker">The full picture</div>
+    <h2 style="margin-bottom:.3em">A glance at CIECAM16</h2>
+    <p style="max-width:72ch">XYZ and Lab tell you <em>which</em> color; they don't tell you how it <strong>appears</strong> — that depends on the viewing conditions. A <strong>colour appearance model</strong> predicts the perception.</p>
+    <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1.1fr;gap:14px;align-items:center;margin:.6em 0">
+      <div class="card">
+        <div style="font-weight:700;color:var(--accent);font-size:15px">Inputs</div>
+        <p style="font-size:13.5px;margin:.35em 0 0">stimulus <strong>XYZ</strong> + viewing conditions: adapting white <span style="font-family:monospace">XYZ<sub>w</sub></span>, adapting luminance <span style="font-family:monospace">L<sub>A</sub></span>, background <span style="font-family:monospace">Y<sub>b</sub></span>, surround (avg / dim / dark)</p>
+      </div>
+      <div style="font-size:24px;color:var(--muted);text-align:center">→</div>
+      <div class="card">
+        <div style="font-weight:700;color:var(--gold);font-size:15px">CIECAM16</div>
+        <p style="font-size:13.5px;margin:.35em 0 0"><strong>CAT16</strong> adaptation → cone-response compression → opponent (red-green / yellow-blue) signals</p>
+      </div>
+      <div style="font-size:24px;color:var(--muted);text-align:center">→</div>
+      <div class="card">
+        <div style="font-weight:700;color:var(--green);font-size:15px">Appearance correlates</div>
+        <p style="font-size:13.5px;margin:.35em 0 0"><strong>J</strong> lightness · <strong>Q</strong> brightness · <strong>C</strong> chroma · <strong>M</strong> colourfulness · <strong>s</strong> saturation · <strong>h</strong> hue</p>
+      </div>
+    </div>
+    <p style="font-size:15px;color:var(--muted)">Why care: predicts the <strong>same</strong> appearance across different lights/media (cross-media matching, gamut mapping), and its uniform space <strong>CAM16-UCS</strong> gives a better perceptual ΔE than Lab. It's the modernized successor to CIECAM02.</p>
+  </section>
+
+  <!-- ROSCH-MACADAM color solids -->
+  <section class="slide">
+    <div class="kicker">Every colour that can exist</div>
+    <h2 style="margin-bottom:.25em">The Rösch–MacAdam solid: all real surface colours</h2>
+    <div style="display:flex;gap:2cqw;align-items:center;justify-content:center;flex-wrap:wrap">
+      <video src="solid_srgb.mp4" autoplay loop muted playsinline style="max-width:40%;max-height:50cqh;border-radius:12px;border:1px solid var(--line)"></video>
+      <video src="solid_ciecam02.mp4" autoplay loop muted playsinline style="max-width:40%;max-height:50cqh;border-radius:12px;border:1px solid var(--line)"></video>
+    </div>
+    <p style="margin-top:.45em;max-width:80ch;font-size:clamp(14px,1.45cqw,20px)">The <strong>optimal-colour solid</strong> (MacAdam limits) under D65 — the boundary of <em class="hl">every physically realizable object colour</em>, built from ideal 0/1 reflectance spectra. <strong>Left, in linear sRGB:</strong> the sRGB gamut (yellow cube) is a small corner — many real surface colours can't even be encoded in sRGB. <strong>Right, in CIECAM02</strong> (CAM02-UCS): the same solid reshaped into a perceptual appearance space — the shape gamut-mapping actually works in.</p>
+  </section>
+
+  <!-- DIVIDER: Part VIII Camera calibration -->
+  <section class="slide divider">
+    <div class="divider-inner">
+      <div class="part-num">Part VIII</div>
+      <h1>Camera<br>calibration</h1>
+      <div class="divider-rule"></div>
+      <p class="divider-sub">From raw sensor RGB to real, repeatable color — with a ColorChecker.</p>
+    </div>
+  </section>
+
+  <!-- C1 calibration: linearization -->
+  <section class="slide tight">
+    <div class="kicker">Calibration · stage 1 — radiometric</div>
+    <h2 style="margin-bottom:.35em">Linearize the camera using the neutral patches</h2>
+    <div class="iv">
+      <div class="controls">
+        <p style="font-size:15px;color:var(--muted);max-width:46ch;margin:0 0 4px">
+          Raw camera output is <strong>not scene-linear</strong> — the ISP bakes in a tone curve. Colorimetry needs linear values. The ColorChecker’s <strong>6 neutral patches</strong> have known relative luminance, so we fit the inverse response.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;margin:2px 0 2px">
+          <canvas id="linCC" width="192" height="128" style="border-radius:6px;flex:none"></canvas>
+          <span style="font-size:12.5px;color:var(--muted);max-width:20ch">The bottom row — 6 <strong style="color:#e6edf3">neutral</strong> patches, dark→light — is the greyscale we fit&nbsp;γ&nbsp;to.</span>
+        </div>
+        <div class="eq" data-latex="\begin{aligned} \text{model:} \quad v &= L^{1/\gamma} &\longrightarrow& \quad \text{recover } \gamma \\ \text{fit:} \quad \gamma^* &= \operatorname*{argmin}_{\gamma} \sum_i \bigl( v_i^{\gamma} - L_i \bigr)^2 \end{aligned}"></div>
+        <div class="slider" style="grid-template-columns:64px 1fr 52px"><span style="font-family:monospace;font-size:15px">γ (decode)</span><input type="range" min="1" max="3" step="0.02" value="1.6" id="linGamma"><span class="bignum" id="linGammaV">1.60</span></div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <button id="linFit" style="background:var(--panel);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:7px 14px;cursor:pointer;font-size:14px">Least-squares fit</button>
+          <span id="linRMS" class="mathout"></span>
+        </div>
+        <p style="font-size:12px;color:#586069;margin:2px 0 0">A real pipeline fits a richer curve or 1-D LUT, but γ captures the idea: straighten the response so values are proportional to scene radiance.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+        <canvas id="linCanvas" class="diagram" width="380" height="360"></canvas>
+        <p style="font-size:13px;color:var(--muted);margin:0"><span style="color:#ff9e57">●</span> raw response &nbsp; <span style="color:#fff">●</span> linearized — land them on the diagonal.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- C2 calibration: color correction matrix -->
+  <section class="slide tight">
+    <div class="kicker">Calibration · stage 2 — colorimetric</div>
+    <h2 style="margin-bottom:.35em">Color-correction: least squares → optimization</h2>
+    <div class="iv">
+      <div class="controls">
+        <p style="font-size:14.5px;color:var(--muted);max-width:none;margin:0 0 4px">
+          <strong>Goal: calibrate the sensor.</strong> A camera's raw RGB are its <em>own</em> arbitrary responses — not colorimetric, and not comparable across cameras or lights. Shoot a chart of <strong>known</strong> colors and fit the map sensor&nbsp;RGB → reference XYZ/sRGB. Payoff: accurate, repeatable color (product, medical, scientific), camera-to-camera consistency — it's exactly the matrix baked into every ISP / DNG <code>ColorMatrix</code>.
+        </p>
+        <p style="font-size:13px;color:#586069;max-width:none;margin:0 0 2px">
+          Even linearized, camera RGB ≠ XYZ — the sensor's sensitivities violate the <strong>Luther condition</strong>, so no exact linear map exists; we fit the best one over the 24 patches.
+        </p>
+        <div class="eq" data-latex="\begin{aligned} \min_M \sum_i \| M \mathbf{c}_i - \mathbf{t}_i \|^2 \\ M &= T C^\top (C C^\top)^{-1} \quad \text{(3×3, closed form)} \end{aligned}"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:2px">
+          <span style="font-size:14px;color:var(--muted)">Model</span>
+          <select class="spc" id="ccmMethod">
+            <option value="linear">Linear 3×3</option>
+            <option value="poly">Polynomial (deg 2, 9 terms)</option>
+            <option value="root">Root-polynomial (deg 2, 6 terms)</option>
+          </select>
+        </div>
+        <div class="slider" style="grid-template-columns:96px 1fr 44px"><span style="font-size:13px;color:var(--muted)">sensor nonlinearity</span><input type="range" min="0" max="1" step="0.02" value="0.45" id="ccmNL"><span class="bignum" id="ccmNLV">0.45</span></div>
+        <div id="ccmInfo" class="mathout" style="margin-top:2px"></div>
+        <p style="font-size:12px;color:#586069;max-width:none;margin:2px 0 0">Polynomial / root-polynomial regression (Finlayson) add nonlinear terms; root-poly is additionally exposure-invariant. Real systems also use constrained LS (preserve neutral/exposure) and minimize ΔE in CIELAB, not RMS in linear.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+        <canvas id="ccmCanvas" class="diagram" width="420" height="288"></canvas>
+        <p style="font-size:13px;color:var(--muted);margin:0">Outer = reference, inner square = corrected. Lower ΔE = better match.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ASSUMPTIONS recap -->
+  <section class="slide">
+    <div class="kicker">Back to the opening question</div>
+    <h2 style="margin-bottom:.35em">Opening that pixel = a stack of assumptions</h2>
+    <p style="margin-bottom:.5em">An untagged JPG/PNG hands you <span style="font-family:monospace"><span class="tag-r">235</span>, <span class="tag-g">123</span>, <span class="tag-b">85</span></span> and <strong>no ICC profile</strong>. Every tool then silently assumes <strong>sRGB</strong> — which unpacks to:</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;font-size:16px;max-width:64ch">
+      <div>● <strong>Color model</strong> → additive RGB</div>
+      <div>● <strong>White point</strong> → D65 (0.3127, 0.3290)</div>
+      <div>● <strong>Primaries</strong> → R(.64,.33) G(.30,.60) B(.15,.06)</div>
+      <div>● <strong>Connection space</strong> → XYZ / Lab @ D50</div>
+      <div>● <strong>EOTF</strong> → sRGB ~2.2 piecewise curve</div>
+      <div>● <strong>Range / depth</strong> → 0–255, full-range, 8-bit</div>
+    </div>
+    <p style="margin-top:.7em">Change any one — open an Adobe RGB shot as sRGB, ignore the EOTF, assume D65 where it was D50 — and the <strong>same numbers become the wrong color</strong>. “Just RGB” is never just RGB.</p>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide">
+    <div class="kicker">Recap</div>
+    <h2>The whole story in one breath</h2>
+    <ul class="bul" style="font-size:18px">
+      <li><strong>Perception:</strong> color is a subjective 3-response projection of a spectrum — already three numbers, before any RGB — which is exactly why three primaries can reproduce it.</li>
+      <li><strong>Primaries</strong> = physical colors pinned by chromaticity (x, y); their triangle is the <strong>gamut</strong>, the <strong>white point</strong> scales them.</li>
+      <li>One <strong>3×3 matrix</strong> converts recipe ↔ real color (XYZ); an <strong>ICC profile</strong> stores it with tone curves + white point.</li>
+      <li>Conversion = linearize → matrix → inverse matrix; gamut gaps handled by rendering intent.</li>
+      <li><strong>Calibration:</strong> linearize the sensor (neutral patches), then fit a color-correction map (least squares → polynomial / root-polynomial) so camera RGB becomes colorimetric.</li>
+    </ul>
+    <p style="margin-top:1em;color:var(--muted)">Three numbers only become a color once you say what the ingredients are.</p>
+  </section>
+
+  <div class="hud"><div class="fill" id="fill"></div></div>
+  <div class="counter"><span id="cur">1</span> / <span id="total">12</span></div>
+  <div class="hint">← → / Space to navigate</div>
+  <div class="nav">
+    <button id="prev" aria-label="Previous">‹</button>
+    <button id="next" aria-label="Next">›</button>
+  </div>
+</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  const fill=document.getElementById('fill');
+  const cur=document.getElementById('cur');
+  document.getElementById('total').textContent=slides.length;
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    fill.style.width=((i+1)/slides.length*100)+'%';
+    cur.textContent=i+1;
+  }
+  function next(){show(i+1)} function prev(){show(i-1)}
+  document.getElementById('next').onclick=next;
+  document.getElementById('prev').onclick=prev;
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();next()}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();prev()}
+    else if(e.key==='Home'){show(0)} else if(e.key==='End'){show(slides.length-1)}
+  });
+  // swipe
+  let x0=null;
+  document.addEventListener('touchstart',e=>x0=e.touches[0].clientX,{passive:true});
+  document.addEventListener('touchend',e=>{
+    if(x0===null)return;const dx=e.changedTouches[0].clientX-x0;
+    if(Math.abs(dx)>50){dx<0?next():prev()} x0=null;
+  });
+  show(0);
+</script>
+
+<script>
+(function(){
+  // ---------- transfer functions ----------
+  const srgbLin = c => c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4);
+  const srgbEnc = c => c<=0.0031308 ? 12.92*c : 1.055*Math.pow(c,1/2.4)-0.055;
+  const adobeLin = c => Math.pow(c, 563/256);            // Adobe RGB gamma 2.19921875
+  // XYZ(D65) -> linear sRGB, for painting the diagram and swatches
+  const XYZ2sRGB = (X,Y,Z) => [
+     3.2404542*X -1.5371385*Y -0.4985314*Z,
+    -0.9692660*X +1.8760108*Y +0.0415560*Z,
+     0.0556434*X -0.2040259*Y +1.0572252*Z ];
+
+  // primaries (xy) for the gamut triangles
+  const GAMUTS = {
+    srgb:   {name:'sRGB',      color:'#ffffff', r:[.640,.330], g:[.300,.600], b:[.150,.060]},
+    p3:     {name:'Display P3',color:'#ff7ab6', r:[.680,.320], g:[.265,.690], b:[.150,.060]},
+    adobe:  {name:'Adobe RGB', color:'#ffd43b', r:[.640,.330], g:[.210,.710], b:[.150,.060]},
+    rec2020:{name:'Rec. 2020', color:'#51cf66', r:[.708,.292], g:[.170,.797], b:[.131,.046]},
+  };
+  // linear RGB -> XYZ, canonical D65 matrices
+  const MAT = {
+    srgb: [[0.4124564,0.3575761,0.1804375],[0.2126729,0.7151522,0.0721750],[0.0193339,0.1191920,0.9503041]],
+    p3:   [[0.4865709,0.2656677,0.1982173],[0.2289746,0.6917385,0.0792869],[0.0000000,0.0451134,1.0439444]],
+    adobe:[[0.5767309,0.1855540,0.1881852],[0.2973769,0.6273491,0.0752741],[0.0270343,0.0706872,0.9911085]],
+  };
+  const LINFN = {srgb:srgbLin, p3:srgbLin, adobe:adobeLin};
+
+  // CIE 1931 2° spectral locus (wavelength, x, y)
+  const LOCUS=[[380,.1741,.0050],[385,.1740,.0050],[390,.1738,.0049],[395,.1736,.0049],[400,.1733,.0048],[405,.1730,.0048],[410,.1726,.0048],[415,.1721,.0048],[420,.1714,.0051],[425,.1703,.0058],[430,.1689,.0069],[435,.1669,.0086],[440,.1644,.0109],[445,.1611,.0138],[450,.1566,.0177],[455,.1510,.0227],[460,.1440,.0297],[465,.1355,.0399],[470,.1241,.0578],[475,.1096,.0868],[480,.0913,.1327],[485,.0687,.2007],[490,.0454,.2950],[495,.0235,.4127],[500,.0082,.5384],[505,.0039,.6548],[510,.0139,.7502],[515,.0389,.8120],[520,.0743,.8338],[525,.1142,.8262],[530,.1547,.8059],[535,.1929,.7816],[540,.2296,.7543],[545,.2658,.7243],[550,.3016,.6923],[555,.3373,.6589],[560,.3731,.6245],[565,.4087,.5896],[570,.4441,.5547],[575,.4788,.5202],[580,.5125,.4866],[585,.5448,.4544],[590,.5752,.4242],[595,.6029,.3965],[600,.6270,.3725],[605,.6482,.3514],[610,.6658,.3340],[615,.6801,.3197],[620,.6915,.3083],[625,.7006,.2993],[630,.7079,.2920],[635,.7140,.2859],[640,.7190,.2809],[645,.7230,.2770],[650,.7260,.2740],[655,.7283,.2717],[660,.7300,.2700],[665,.7311,.2689],[670,.7320,.2680],[675,.7327,.2673],[680,.7334,.2666],[690,.7340,.2660],[700,.7347,.2653]];
+  const LX=LOCUS.map(p=>p[1]), LY=LOCUS.map(p=>p[2]);
+  function inLocus(x,y){
+    let inside=false,n=LOCUS.length;
+    for(let i=0,j=n-1;i<n;j=i++){
+      const xi=LX[i],yi=LY[i],xj=LX[j],yj=LY[j];
+      if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+    }
+    return inside;
+  }
+
+  // ---------- plot geometry ----------
+  const XMAX=0.75, YMAX=0.85, ML=46, MR=14, MT=14, MB=34;
+  function makeMap(cv){
+    const W=cv.width,H=cv.height, pw=W-ML-MR, ph=H-MT-MB;
+    return {W,H,
+      mx:x=>ML+x/XMAX*pw, my:y=>(H-MB)-y/YMAX*ph,
+      ix:px=>(px-ML)/pw*XMAX, iy:py=>((H-MB)-py)/ph*YMAX};
+  }
+  const baseCache=new WeakMap();
+  function buildBase(cv){
+    const m=makeMap(cv),W=cv.width,H=cv.height;
+    const ctx=cv.getContext('2d'), img=ctx.createImageData(W,H), d=img.data;
+    for(let py=MT;py<H-MB;py++) for(let px=ML;px<W-MR;px++){
+      const x=m.ix(px), y=Math.max(1e-4,m.iy(py));
+      if(x<=0||!inLocus(x,y)) continue;
+      const X=x/y, Y=1, Z=(1-x-y)/y;
+      let [r,g,b]=XYZ2sRGB(X,Y,Z);
+      const mx=Math.max(r,g,b); if(mx<=0) continue;
+      r=Math.max(0,r/mx); g=Math.max(0,g/mx); b=Math.max(0,b/mx);
+      const i=(py*W+px)*4;
+      d[i]=srgbEnc(r)*255; d[i+1]=srgbEnc(g)*255; d[i+2]=srgbEnc(b)*255; d[i+3]=235;
+    }
+    baseCache.set(cv,img); return img;
+  }
+  function triArea(g){const[ax,ay]=g.r,[bx,by]=g.g,[cx,cy]=g.b;return Math.abs((bx-ax)*(cy-ay)-(cx-ax)*(by-ay))/2;}
+
+  function render(cv,opts){
+    const ctx=cv.getContext('2d'), m=makeMap(cv), W=cv.width, H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.putImageData(baseCache.get(cv)||buildBase(cv),0,0);
+    // axes + ticks
+    ctx.strokeStyle='#3a424d'; ctx.lineWidth=1; ctx.fillStyle='#7d8794'; ctx.font='11px monospace';
+    ctx.beginPath(); ctx.moveTo(ML,MT); ctx.lineTo(ML,H-MB); ctx.lineTo(W-MR,H-MB); ctx.stroke();
+    for(let t=0;t<=0.7001;t+=0.1){const X=m.mx(t);ctx.beginPath();ctx.moveTo(X,H-MB);ctx.lineTo(X,H-MB+4);ctx.stroke();ctx.fillText(t.toFixed(1),X-7,H-MB+16);}
+    for(let t=0;t<=0.8001;t+=0.1){const Y=m.my(t);ctx.beginPath();ctx.moveTo(ML,Y);ctx.lineTo(ML-4,Y);ctx.stroke();ctx.fillText(t.toFixed(1),6,Y+3);}
+    ctx.fillStyle='#9aa4b0'; ctx.fillText('x',W-MR-9,H-MB+16); ctx.fillText('y',8,MT+6);
+    // locus outline
+    ctx.strokeStyle='rgba(255,255,255,.22)'; ctx.lineWidth=1; ctx.beginPath();
+    LOCUS.forEach((p,i)=>{const X=m.mx(p[1]),Y=m.my(p[2]); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});
+    ctx.closePath(); ctx.stroke();
+    // gamut triangles
+    (opts.gamuts||[]).forEach(key=>{
+      const g=GAMUTS[key], pts=[g.r,g.g,g.b];
+      ctx.strokeStyle=g.color; ctx.lineWidth=2; ctx.beginPath();
+      pts.forEach((p,i)=>{const X=m.mx(p[0]),Y=m.my(p[1]); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});
+      ctx.closePath(); ctx.stroke();
+      ctx.fillStyle=g.color; pts.forEach(p=>{ctx.beginPath();ctx.arc(m.mx(p[0]),m.my(p[1]),3.2,0,7);ctx.fill();});
+    });
+    // marker
+    if(opts.point){
+      const X=m.mx(opts.point[0]),Y=m.my(opts.point[1]);
+      ctx.strokeStyle='#fff'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(X,Y,7,0,7); ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(X,Y,2,0,7); ctx.fill();
+    }
+  }
+
+  // ---------- gamut explorer ----------
+  const gcv=document.getElementById('gamutCanvas'), cov=document.getElementById('coverage');
+  function gamutUpdate(){
+    const on=[...document.querySelectorAll('[data-g]')].filter(c=>c.checked).map(c=>c.dataset.g);
+    render(gcv,{gamuts:on});
+    const sA=triArea(GAMUTS.srgb);
+    cov.innerHTML = on.map(k=>{
+      const pct=(triArea(GAMUTS[k])/sA*100).toFixed(0);
+      return `<span class="swatchkey" style="background:${GAMUTS[k].color};vertical-align:middle"></span> ${GAMUTS[k].name}: <span class="num">${pct}%</span> of sRGB triangle area`;
+    }).join('\n');
+  }
+  document.querySelectorAll('[data-g]').forEach(c=>c.addEventListener('change',gamutUpdate));
+
+  // ---------- live calculator ----------
+  const ccv=document.getElementById('calcCanvas'), out=document.getElementById('calcOut'), sw=document.getElementById('cSwatch');
+  const E={R:cR,G:cG,B:cB}, V={R:cRv,G:cGv,B:cBv}, spaceSel=cSpace;
+  const f=(n,p=4)=>n.toFixed(p);
+  function calcUpdate(){
+    const key=spaceSel.value, M=MAT[key], lin=LINFN[key];
+    const R=+E.R.value,G=+E.G.value,B=+E.B.value;
+    V.R.textContent=R; V.G.textContent=G; V.B.textContent=B;
+    const rn=R/255,gn=G/255,bn=B/255, rl=lin(rn),gl=lin(gn),bl=lin(bn);
+    const X=M[0][0]*rl+M[0][1]*gl+M[0][2]*bl;
+    const Y=M[1][0]*rl+M[1][1]*gl+M[1][2]*bl;
+    const Z=M[2][0]*rl+M[2][1]*gl+M[2][2]*bl;
+    const s=(X+Y+Z)||1, x=X/s, y=Y/s;
+    let [dr,dg,db]=XYZ2sRGB(X,Y,Z); const cl=v=>Math.max(0,Math.min(1,v));
+    sw.style.background=`rgb(${Math.round(srgbEnc(cl(dr))*255)},${Math.round(srgbEnc(cl(dg))*255)},${Math.round(srgbEnc(cl(db))*255)})`;
+    const gname = key==='adobe' ? 'γ = 2.1992' : 'sRGB EOTF (piecewise)';
+    out.innerHTML =
+`<span style="color:#7d8794">1 · linearize  </span><span style="color:#586069">(${gname})</span>
+R′ ${f(rn,3)} → <span class="num">${f(rl)}</span>   G′ ${f(gn,3)} → <span class="num">${f(gl)}</span>   B′ ${f(bn,3)} → <span class="num">${f(bl)}</span>
+<span style="color:#7d8794">2 · XYZ = M · [R G B]ₗᵢₙ   (${GAMUTS[key].name})</span>
+X = ${f(M[0][0],3)}·${f(rl,3)} + ${f(M[0][1],3)}·${f(gl,3)} + ${f(M[0][2],3)}·${f(bl,3)} = <span class="num">${f(X)}</span>
+Y = ${f(M[1][0],3)}·${f(rl,3)} + ${f(M[1][1],3)}·${f(gl,3)} + ${f(M[1][2],3)}·${f(bl,3)} = <span class="num">${f(Y)}</span>
+Z = ${f(M[2][0],3)}·${f(rl,3)} + ${f(M[2][1],3)}·${f(gl,3)} + ${f(M[2][2],3)}·${f(bl,3)} = <span class="num">${f(Z)}</span>
+<span style="color:#7d8794">3 · chromaticity</span>
+x = <span class="num">${f(x)}</span>   y = <span class="num">${f(y)}</span>   Y(luminance) = <span class="num">${f(Y)}</span>`;
+    render(ccv,{gamuts:[key],point:[x,y]});
+  }
+  [E.R,E.G,E.B].forEach(e=>e.addEventListener('input',calcUpdate));
+  spaceSel.addEventListener('change',calcUpdate);
+
+  gamutUpdate();
+  calcUpdate();
+})();
+</script>
+
+<script>
+(function(){
+  // ---------- shared color math ----------
+  const sLin=c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);
+  const sEnc=c=>{c=Math.max(0,Math.min(1,c));return c<=0.0031308?12.92*c:1.055*Math.pow(c,1/2.4)-0.055;};
+  const MS=[[0.4124564,0.3575761,0.1804375],[0.2126729,0.7151522,0.0721750],[0.0193339,0.1191920,0.9503041]];
+  const mul3=(M,v)=>[M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2],M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2],M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]];
+  const Wn=[0.95047,1.0,1.08883];
+  function lab(XYZ){
+    const f=t=>t>0.008856?Math.cbrt(t):7.787*t+16/116;
+    const fx=f(XYZ[0]/Wn[0]),fy=f(XYZ[1]/Wn[1]),fz=f(XYZ[2]/Wn[2]);
+    return [116*fy-16,500*(fx-fy),200*(fy-fz)];
+  }
+  const linLab=rgb=>lab(mul3(MS,rgb));
+  const dE=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+  const enc=v=>`rgb(${Math.round(sEnc(v[0])*255)},${Math.round(sEnc(v[1])*255)},${Math.round(sEnc(v[2])*255)})`;
+
+  // 24-patch ColorChecker reference (sRGB 8-bit, X-Rite)
+  const CC=[[115,82,68],[194,150,130],[98,122,157],[87,108,67],[133,128,177],[103,189,170],[214,126,44],[80,91,166],[193,90,99],[94,60,108],[157,188,64],[224,163,46],[56,61,150],[70,148,73],[175,54,60],[231,199,31],[187,86,149],[8,133,161],[243,243,242],[200,200,200],[160,160,160],[122,122,121],[85,85,85],[52,52,52]];
+  const refLin=CC.map(p=>p.map(v=>sLin(v/255)));
+  const refLab=refLin.map(linLab);
+
+  // ---------- stage 1: linearization plot ----------
+  (function(){
+    const cv=document.getElementById('linCanvas'); if(!cv) return;
+    const ctx=cv.getContext('2d'), W=cv.width,H=cv.height, P=40;
+    const neutral=CC.slice(18).map(p=>sLin(p[0]/255));          // 6 known scene-linear luminances
+    const xs=neutral.slice().sort((a,b)=>a-b);
+    const gT=2.2, ys=xs.map(x=>Math.pow(x,1/gT)+ (Math.random()-0.5)*0); // raw encoded (deterministic, no noise)
+    const gEl=document.getElementById('linGamma'),gV=document.getElementById('linGammaV'),rms=document.getElementById('linRMS');
+    const mx=x=>P+x*(W-P-14), my=y=>(H-P)-y*(H-P-14);
+    function draw(){
+      const g=+gEl.value; gV.textContent=g.toFixed(2);
+      ctx.clearRect(0,0,W,H);
+      // frame
+      ctx.strokeStyle='#3a424d';ctx.fillStyle='#7d8794';ctx.font='11px monospace';
+      ctx.beginPath();ctx.moveTo(P,14);ctx.lineTo(P,H-P);ctx.lineTo(W-14,H-P);ctx.stroke();
+      ctx.fillText('camera value v',P+6,24); ctx.fillText('scene-linear L →',W-130,H-P+22);
+      // diagonal (target)
+      ctx.strokeStyle='#48515c';ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(mx(0),my(0));ctx.lineTo(mx(1),my(1));ctx.stroke();ctx.setLineDash([]);
+      // raw response curve v = L^(1/gT)
+      ctx.strokeStyle='#ff9e57';ctx.globalAlpha=.55;ctx.beginPath();
+      for(let i=0;i<=60;i++){const L=i/60,v=Math.pow(L,1/gT);i?ctx.lineTo(mx(L),my(v)):ctx.moveTo(mx(L),my(v));}
+      ctx.stroke();ctx.globalAlpha=1;
+      // points
+      let s=0;
+      xs.forEach((x,i)=>{
+        const y=ys[i], lin=Math.pow(y,g); s+=(lin-x)*(lin-x);
+        ctx.fillStyle='#ff9e57';ctx.beginPath();ctx.arc(mx(x),my(y),4,0,7);ctx.fill();        // raw
+        ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(mx(x),my(lin),4,0,7);ctx.fill();         // linearized
+      });
+      const r=Math.sqrt(s/xs.length);
+      rms.innerHTML=`RMS off-diagonal = <span class="num">${r.toFixed(4)}</span>${r<0.01?'  ✓ linear':''}`;
+    }
+    gEl.addEventListener('input',draw);
+    document.getElementById('linFit').addEventListener('click',()=>{
+      // L = v^γ  ⇒  γ = mean( ln L / ln v )
+      let acc=0,n=0; xs.forEach((x,i)=>{const lv=Math.log(ys[i]);if(x>1e-3&&lv<-1e-3){acc+=Math.log(x)/lv;n++;}});
+      gEl.value=(acc/n).toFixed(2); draw();
+    });
+    draw();
+
+    // mini ColorChecker: 6×4 chart, bottom row (neutrals) highlighted
+    (function(){
+      const cc=document.getElementById('linCC'); if(!cc) return;
+      const cx=cc.getContext('2d'), cols=6, rows=4, cw=cc.width/cols, ch=cc.height/rows, pad=1.5;
+      cx.clearRect(0,0,cc.width,cc.height);
+      for(let idx=0;idx<24;idx++){
+        const col=idx%cols, row=(idx/cols)|0, neutral=row===rows-1;
+        const x=col*cw, y=row*ch;
+        cx.globalAlpha=neutral?1:0.35;
+        cx.fillStyle=`rgb(${CC[idx][0]},${CC[idx][1]},${CC[idx][2]})`;
+        cx.fillRect(x+pad,y+pad,cw-2*pad,ch-2*pad);
+      }
+      cx.globalAlpha=1;
+      // outline the neutral row
+      cx.strokeStyle='#58a6ff'; cx.lineWidth=2;
+      cx.strokeRect(1,(rows-1)*ch+1,cc.width-2,ch-2);
+    })();
+  })();
+
+  // ---------- stage 2: color-correction matrix ----------
+  (function(){
+    const cv=document.getElementById('ccmCanvas'); if(!cv) return;
+    const ctx=cv.getContext('2d');
+    const Scam=[[1.00,0.10,-0.04],[0.06,0.95,0.05],[0.02,0.07,1.04]];   // plausible-but-wrong sensor mixing
+    const noise=i=>[(Math.sin(i*12.9)*0.5+0.5-0.5)*0.006,(Math.sin(i*7.7)*0.5)*0.006,(Math.sin(i*3.3)*0.5)*0.006];
+    function capture(lin,i,a){
+      const m=mul3(Scam,lin), n=noise(i);
+      const q=[lin[0]*lin[1]-0.1*lin[2], lin[1]*lin[2]-0.1*lin[0], lin[2]*lin[0]-0.1*lin[1]];
+      return [Math.max(0,m[0]+a*q[0]+n[0]),Math.max(0,m[1]+a*q[1]+n[1]),Math.max(0,m[2]+a*q[2]+n[2])];
+    }
+    const feat=(c,mode)=>{
+      const[r,g,b]=c;
+      if(mode==='linear')return[r,g,b];
+      if(mode==='root')return[r,g,b,Math.sqrt(r*g),Math.sqrt(g*b),Math.sqrt(b*r)];
+      return[r,g,b,r*r,g*g,b*b,r*g,g*b,b*r];
+    };
+    // solve (AᵀA+λI)w = Aᵀt  for one target column; A is N×k feature matrix
+    function fit(F,T,k){
+      const A=Array.from({length:k},()=>new Float64Array(k)), Bv=[new Float64Array(k),new Float64Array(k),new Float64Array(k)];
+      for(let r=0;r<F.length;r++){const f=F[r];
+        for(let i=0;i<k;i++){for(let j=0;j<k;j++)A[i][j]+=f[i]*f[j];
+          for(let c=0;c<3;c++)Bv[c][i]+=f[i]*T[r][c];}}
+      for(let i=0;i<k;i++)A[i][i]+=1e-5;
+      return [0,1,2].map(c=>solve(A.map(r=>Float64Array.from(r)),Float64Array.from(Bv[c]),k));
+    }
+    function solve(A,b,k){            // Gaussian elimination, partial pivot
+      for(let p=0;p<k;p++){
+        let mx=p;for(let r=p+1;r<k;r++)if(Math.abs(A[r][p])>Math.abs(A[mx][p]))mx=r;
+        [A[p],A[mx]]=[A[mx],A[p]];[b[p],b[mx]]=[b[mx],b[p]];
+        for(let r=p+1;r<k;r++){const f=A[r][p]/A[p][p];for(let c=p;c<k;c++)A[r][c]-=f*A[p][c];b[r]-=f*b[p];}
+      }
+      const x=new Float64Array(k);
+      for(let r=k-1;r>=0;r--){let s=b[r];for(let c=r+1;c<k;c++)s-=A[r][c]*x[c];x[r]=s/A[r][r];}
+      return x;
+    }
+    const methodSel=document.getElementById('ccmMethod'),nlEl=document.getElementById('ccmNL'),nlV=document.getElementById('ccmNLV'),info=document.getElementById('ccmInfo');
+    function update(){
+      const mode=methodSel.value, a=+nlEl.value; nlV.textContent=a.toFixed(2);
+      const cams=refLin.map((l,i)=>capture(l,i,a));
+      const F=cams.map(c=>feat(c,mode)), k=F[0].length;
+      const W=fit(F,refLin,k);                                  // W[outChannel] = coeff vector
+      const corr=cams.map(c=>{const f=feat(c,mode);return [0,1,2].map(o=>{let s=0;for(let i=0;i<k;i++)s+=W[o][i]*f[i];return Math.max(0,s);});});
+      const es=corr.map((c,i)=>dE(linLab(c),refLab[i]));
+      const mean=es.reduce((x,y)=>x+y,0)/es.length, max=Math.max(...es);
+      // draw 6×4 grid: outer = reference, inner = corrected
+      ctx.clearRect(0,0,cv.width,cv.height);
+      const cols=6,rows=4,cw=cv.width/cols,ch=cv.height/rows;
+      for(let i=0;i<24;i++){
+        const cx=(i%cols)*cw, cy=Math.floor(i/cols)*ch;
+        ctx.fillStyle=`rgb(${CC[i][0]},${CC[i][1]},${CC[i][2]})`;
+        ctx.fillRect(cx+3,cy+3,cw-6,ch-6);
+        ctx.fillStyle=enc(corr[i]);
+        ctx.fillRect(cx+cw*0.28,cy+ch*0.28,cw*0.44,ch*0.44);
+      }
+      let mtx='';
+      if(mode==='linear'){const M=[0,1,2].map(o=>[0,1,2].map(i=>W[o][i]));
+        mtx=`\nM =  [ ${M[0].map(v=>v.toFixed(3).padStart(7)).join(' ')} ]\n     [ ${M[1].map(v=>v.toFixed(3).padStart(7)).join(' ')} ]\n     [ ${M[2].map(v=>v.toFixed(3).padStart(7)).join(' ')} ]`;
+      } else mtx=`\n${k} terms/channel · ${k*3} coefficients`;
+      info.innerHTML=`mean ΔE = <span class="num">${mean.toFixed(2)}</span>   max ΔE = <span class="num">${max.toFixed(2)}</span>${mtx}`;
+    }
+    methodSel.addEventListener('change',update);
+    nlEl.addEventListener('input',update);
+    update();
+  })();
+})();
+</script>
+
+<script>
+document.querySelectorAll('[data-latex]').forEach(el => {
+  katex.render(el.dataset.latex, el, {displayMode: true, throwOnError: false});
+});
+</script>
+<script>
+(function(){
+  const WLN=[400,410,420,430,440,450,460,470,480,490,500,510,520,530,540,550,560,570,580,590,600,610,620,630,640,650,660,670,680,690,700];
+  const ILLUM={"D65":[0.7024,0.7765,0.7931,0.7358,0.8901,0.9932,1.0,0.975,0.984,0.9236,0.9282,0.915,0.8895,0.9141,0.8862,0.8832,0.8488,0.8177,0.8131,0.7528,0.764,0.7605,0.7444,0.707,0.7104,0.6793,0.6809,0.6984,0.6645,0.5918,0.6078],"D50":[0.4787,0.5487,0.5828,0.5613,0.7264,0.847,0.8797,0.887,0.9234,0.8928,0.9293,0.938,0.943,0.9912,0.9782,0.9933,0.9708,0.9489,0.9603,0.9077,0.9484,0.9637,0.9615,0.9293,0.9597,0.9288,0.9533,1.0,0.9624,0.8483,0.8893],"A (tungsten)":[0.0742,0.0892,0.1059,0.1244,0.1448,0.1669,0.1907,0.2162,0.2433,0.2719,0.3019,0.3332,0.3657,0.3991,0.4335,0.4686,0.5044,0.5406,0.5772,0.614,0.6509,0.6877,0.7244,0.7608,0.7968,0.8324,0.8674,0.9017,0.9353,0.9681,1.0],"F2 (fluor.)":[0.1509,0.1689,0.1839,0.222,0.5182,0.2909,0.3155,0.3308,0.3357,0.3344,0.3194,0.3093,0.3142,0.3528,0.4392,0.7301,0.7091,0.817,1.0,0.8188,0.7258,0.6055,0.4805,0.3686,0.2769,0.2054,0.1514,0.1119,0.0829,0.0671,0.0483]};
+  const REFL={"Red":[0.051,0.05,0.049,0.049,0.049,0.049,0.048,0.047,0.045,0.044,0.044,0.044,0.044,0.044,0.045,0.047,0.05,0.057,0.072,0.109,0.192,0.332,0.486,0.598,0.654,0.686,0.7,0.707,0.718,0.724,0.729],"Green":[0.058,0.059,0.059,0.062,0.065,0.07,0.078,0.091,0.113,0.14,0.18,0.244,0.324,0.363,0.355,0.323,0.281,0.238,0.196,0.158,0.124,0.101,0.089,0.084,0.08,0.077,0.075,0.075,0.078,0.082,0.088],"Blue":[0.136,0.175,0.208,0.244,0.29,0.335,0.338,0.302,0.239,0.172,0.12,0.086,0.066,0.054,0.048,0.045,0.043,0.041,0.04,0.04,0.039,0.04,0.04,0.041,0.042,0.042,0.043,0.044,0.044,0.045,0.048],"Yellow":[0.053,0.053,0.052,0.053,0.053,0.055,0.059,0.075,0.121,0.202,0.303,0.394,0.475,0.544,0.597,0.63,0.66,0.686,0.708,0.726,0.737,0.746,0.753,0.761,0.768,0.777,0.78,0.781,0.785,0.787,0.792],"White":[0.409,0.671,0.84,0.878,0.883,0.886,0.887,0.888,0.888,0.888,0.887,0.887,0.887,0.887,0.887,0.886,0.887,0.888,0.887,0.886,0.887,0.889,0.891,0.891,0.89,0.889,0.889,0.888,0.888,0.888,0.888]};
+  const RGBC={"D65|Red":[0.699,0.185,0.227],"D65|Green":[0.272,0.589,0.273],"D65|Blue":[0.18,0.242,0.592],"D65|Yellow":[0.932,0.786,0.103],"D65|White":[0.949,0.949,0.943],"D50|Red":[0.746,0.166,0.183],"D50|Green":[0.321,0.58,0.22],"D50|Blue":[0.202,0.246,0.518],"D50|Yellow":[0.991,0.775,0.0],"D50|White":[1.0,0.939,0.817],"A (tungsten)|Red":[0.895,0.027,0.022],"A (tungsten)|Green":[0.452,0.536,0.032],"A (tungsten)|Blue":[0.282,0.23,0.336],"A (tungsten)|Yellow":[1.0,0.722,0.0],"A (tungsten)|White":[1.0,0.872,0.489],"F2 (fluor.)|Red":[0.648,0.22,0.158],"F2 (fluor.)|Green":[0.426,0.562,0.156],"F2 (fluor.)|Blue":[0.253,0.216,0.469],"F2 (fluor.)|Yellow":[1.0,0.795,0.0],"F2 (fluor.)|White":[1.0,0.925,0.731]};
+
+  const cv=document.getElementById('p2Canvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const ilSel=document.getElementById('p2Illum'), reSel=document.getElementById('p2Refl');
+  const rint=a=>a.map(c=>Math.round(c*255)).join(',');
+
+  function draw(){
+    const il=ilSel.value, re=reSel.value;
+    const E=ILLUM[il], R=REFL[re], N=WLN.length;
+    const refl=E.map((e,i)=>e*R[i]);
+    const rgb=RGBC[il+'|'+re]||[0,0,0];
+    ctx.clearRect(0,0,W,H);
+    const px0=44,px1=248,py0=22,py1=150;
+    const mx=i=>px0+(WLN[i]-400)/300*(px1-px0);
+    const my=v=>py1-Math.max(0,Math.min(1,v))*(py1-py0);
+    // axes
+    ctx.strokeStyle='#3a424d';ctx.lineWidth=1;ctx.beginPath();
+    ctx.moveTo(px0,py0);ctx.lineTo(px0,py1);ctx.lineTo(px1,py1);ctx.stroke();
+    ctx.fillStyle='#7d8794';ctx.font='9px monospace';ctx.textAlign='center';
+    [400,550,700].forEach(w=>ctx.fillText(w,px0+(w-400)/300*(px1-px0),py1+12));
+    ctx.fillText('λ (nm)',(px0+px1)/2,py1+23);
+    // reflected area filled with perceived colour
+    ctx.beginPath();ctx.moveTo(mx(0),py1);
+    for(let i=0;i<N;i++)ctx.lineTo(mx(i),my(refl[i]));
+    ctx.lineTo(mx(N-1),py1);ctx.closePath();
+    ctx.fillStyle=`rgba(${rint(rgb)},0.35)`;ctx.fill();
+    // curves
+    const curve=(A,color,w,dash)=>{ctx.strokeStyle=color;ctx.lineWidth=w;ctx.setLineDash(dash);ctx.beginPath();for(let i=0;i<N;i++){const x=mx(i),y=my(A[i]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();ctx.setLineDash([]);};
+    curve(E,'#ffd43b',1.2,[4,3]); curve(R,'#8aa0ff',1.4,[]); curve(refl,'#ffffff',2.2,[]);
+    // legend  E · R = E·R
+    ctx.textAlign='left';ctx.font='10px monospace';
+    ctx.fillStyle='#ffd43b';ctx.fillText('E',px0+6,15);
+    ctx.fillStyle='#7d8794';ctx.fillText('·',px0+18,15);
+    ctx.fillStyle='#8aa0ff';ctx.fillText('R',px0+28,15);
+    ctx.fillStyle='#7d8794';ctx.fillText('=',px0+40,15);
+    ctx.fillStyle='#ffffff';ctx.fillText('E·R',px0+54,15);
+    // integral arrow
+    ctx.fillStyle='#9aa4b0';ctx.textAlign='center';ctx.font='11px monospace';
+    ctx.fillText('∫·Sₖ',260,84);ctx.fillText('→',260,98);
+    // response bars R G B
+    const bx=[274,302,330],bcol=['#ff6b6b','#51cf66','#5c7cfa'],blab=['R','G','B'];
+    const baseY=150,hmax=124;
+    for(let i=0;i<3;i++){
+      const h=Math.max(1,rgb[i]*hmax);
+      ctx.fillStyle=bcol[i];ctx.fillRect(bx[i],baseY-h,18,h);
+      ctx.fillStyle='#7d8794';ctx.font='10px monospace';ctx.textAlign='center';
+      ctx.fillText(blab[i],bx[i]+9,baseY+12);
+    }
+    // perceived-colour swatch
+    ctx.fillStyle=`rgb(${rint(rgb)})`;ctx.fillRect(274,170,74,30);
+    ctx.strokeStyle='#30363d';ctx.strokeRect(274,170,74,30);
+    ctx.fillStyle='#7d8794';ctx.font='9px monospace';ctx.textAlign='center';
+    ctx.fillText('perceived',311,209);
+  }
+  ilSel.addEventListener('change',draw);
+  reSel.addEventListener('change',draw);
+  draw();
+})();
+</script>
+<script>
+(function(){
+  const cv=document.getElementById('beCanvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const bits=document.getElementById('beBits'), bitsV=document.getElementById('beBitsV');
+  const gam=document.getElementById('beGamma'), gamV=document.getElementById('beGammaV'), match=document.getElementById('beMatch');
+  const sEnc=l=>l<=0.0031308?12.92*l:1.055*Math.pow(l,1/2.4)-0.055;   // sRGB OETF
+  const sDec=v=>v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4);     // sRGB EOTF
+  const clamp=v=>v<0?0:v>1?1:v;
+
+  function draw(){
+    const B=+bits.value, g=+gam.value, levels=Math.pow(2,B);
+    bitsV.textContent=B; gamV.textContent=g.toFixed(2);
+    match.style.opacity = Math.abs(g-2.4)<0.06 ? '1' : '0';
+    const q=v=>Math.round(clamp(v)*(levels-1))/(levels-1);
+    const strips=[
+      {label:"Reference — continuous", c:"#9aa4b0", f:p=>p},
+      {label:B+"-bit perceptual (sRGB) → matched decode", c:"#9aa4b0", f:p=>{const Vq=q(p); return sEnc(sDec(Vq));}},
+      {label:B+"-bit perceptual → decode with γ = "+g.toFixed(2), c:"#9aa4b0", f:p=>{const Vq=q(p); return sEnc(clamp(Math.pow(Vq,g)));}},
+      {label:B+"-bit perceptual → decode with γ = 2.2 (approx)", c:"#58a6ff", f:p=>{const Vq=q(p); return sEnc(clamp(Math.pow(Vq,2.2)));}},
+      {label:B+"-bit LINEAR → decode  (same bits!)", c:"#ff9e57", f:p=>{const Ll=q(sDec(p)); return sEnc(Ll);}},
+    ];
+    const padT=6, labelH=15, stripH=38, gap=8;
+    const img=ctx.createImageData(W,H), d=img.data;
+    for(let i=0;i<d.length;i+=4){d[i]=10;d[i+1]=13;d[i+2]=18;d[i+3]=255;}
+    strips.forEach((s,si)=>{
+      const y0=padT+labelH+si*(labelH+stripH+gap);
+      for(let x=0;x<W;x++){
+        const byte=Math.round(clamp(s.f(x/(W-1)))*255);
+        for(let y=y0;y<y0+stripH;y++){const k=(y*W+x)*4; d[k]=byte;d[k+1]=byte;d[k+2]=byte;}
+      }
+    });
+    ctx.putImageData(img,0,0);
+    ctx.font="12px monospace"; ctx.textAlign="left";
+    strips.forEach((s,si)=>{
+      const ly=padT+labelH+si*(labelH+stripH+gap)-4;
+      ctx.fillStyle=s.c; ctx.fillText(s.label,4,ly);
+    });
+    ctx.fillStyle="#586069"; ctx.font="10px monospace";
+    ctx.fillText("← deep shadows",4,H-4);
+    ctx.textAlign="right"; ctx.fillText("highlights →",W-4,H-4);
+  }
+  [bits,gam].forEach(e=>e.addEventListener("input",draw));
+  draw();
+})();
+</script>
+
+<script>
+(function(){
+  const cv=document.getElementById('gammaDemo'); if(!cv) return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const sDec=v=>{const c=v/255; return c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);};
+  const sEnc=l=>{l=Math.max(0,Math.min(1,l)); return Math.round((l<=0.0031308?12.92*l:1.055*Math.pow(l,1/2.4)-0.055)*255);};
+  const rgb2lin=c=>c.map(v=>sDec(v));
+  const lin2rgb=l=>l.map(v=>sEnc(v));
+
+  // layout: source | γ-space result | linear result, spread across the full width
+  const srcX=14, srcW=150, gX=200, lX=408, blkW=176, blkH=78, labelH=16, rowH=114, padT=10;
+
+  ctx.fillStyle='#0a0d12'; ctx.fillRect(0,0,W,H);
+  ctx.textBaseline='middle';
+
+  function drawRow(row, srcLabel, drawSource, gColor, lColor){
+    const y=padT+row*rowH;
+    ctx.textAlign='left';
+    // source
+    ctx.fillStyle='#7d8794'; ctx.font='bold 11px monospace';
+    ctx.fillText(srcLabel, srcX, y+8);
+    ctx.fillStyle='#161b22'; ctx.fillRect(srcX, y+labelH, srcW, blkH);
+    ctx.save(); ctx.beginPath(); ctx.rect(srcX, y+labelH, srcW, blkH); ctx.clip();
+    drawSource(srcX, y+labelH, srcW, blkH);
+    ctx.restore();
+    // γ-space result (wrong)
+    ctx.fillStyle='#ff6b6b'; ctx.font='bold 11px monospace';
+    ctx.fillText('γ-space  ✗', gX, y+8);
+    ctx.fillStyle=gColor; ctx.fillRect(gX, y+labelH, blkW, blkH);
+    // linear result (correct)
+    ctx.fillStyle='#51cf66'; ctx.font='bold 11px monospace';
+    ctx.fillText('linear  ✓', lX, y+8);
+    ctx.fillStyle=lColor; ctx.fillRect(lX, y+labelH, blkW, blkH);
+    // resulting rgb printed under each block (well-separated -> no overlap)
+    const yv=y+labelH+blkH+13;
+    ctx.fillStyle='#7d8794'; ctx.font='10px monospace';
+    ctx.fillText(gColor, gX, yv);
+    ctx.fillText(lColor, lX, yv);
+  }
+
+  // --- Row 0: red/green stripes ---
+  (function(){
+    const red=[255,0,0], green=[0,255,0];
+    // gamma average
+    const gAvg=[Math.round((red[0]+green[0])/2), Math.round((red[1]+green[1])/2), Math.round((red[2]+green[2])/2)];
+    // linear average
+    const rLin=rgb2lin(red), gLin=rgb2lin(green);
+    const lAvg=lin2rgb([(rLin[0]+gLin[0])/2, (rLin[1]+gLin[1])/2, (rLin[2]+gLin[2])/2]);
+    const gColor=`rgb(${gAvg[0]},${gAvg[1]},${gAvg[2]})`;
+    const lColor=`rgb(${lAvg[0]},${lAvg[1]},${lAvg[2]})`;
+    drawRow(0, 'R/G stripes', (ox,yo,w,h)=>{
+      const stripeW=6;
+      for(let x=0;x<w;x+=stripeW*2){
+        ctx.fillStyle='#ff0000'; ctx.fillRect(ox+x,yo,stripeW,h);
+        ctx.fillStyle='#00ff00'; ctx.fillRect(ox+x+stripeW,yo,stripeW,h);
+      }
+    }, gColor, lColor);
+  })();
+
+  // --- Row 1: checkerboard ---
+  (function(){
+    const black=[0,0,0], white=[255,255,255];
+    const gAvg=[128,128,128];
+    const bLin=rgb2lin(black), wLin=rgb2lin(white);
+    const lAvg=lin2rgb([(bLin[0]+wLin[0])/2,(bLin[1]+wLin[1])/2,(bLin[2]+wLin[2])/2]);
+    const gColor=`rgb(${gAvg[0]},${gAvg[1]},${gAvg[2]})`;
+    const lColor=`rgb(${lAvg[0]},${lAvg[1]},${lAvg[2]})`;
+    drawRow(1, 'checkerboard', (ox,yo,w,h)=>{
+      const sz=8;
+      for(let y=0;y<h;y+=sz) for(let x=0;x<w;x+=sz){
+        ctx.fillStyle=((x/sz+y/sz)%2)?'#fff':'#000';
+        ctx.fillRect(ox+x,yo+y,sz,sz);
+      }
+    }, gColor, lColor);
+  })();
+
+  // --- Row 2: alpha composite ---
+  (function(){
+    const bg=[0,180,0], fg=[255,255,255], a=0.5;
+    // gamma composite (wrong)
+    const gComp=[
+      Math.round(fg[0]*a+bg[0]*(1-a)),
+      Math.round(fg[1]*a+bg[1]*(1-a)),
+      Math.round(fg[2]*a+bg[2]*(1-a))
+    ];
+    // linear composite (correct)
+    const bgLin=rgb2lin(bg), fgLin=rgb2lin(fg);
+    const lComp=lin2rgb([
+      fgLin[0]*a+bgLin[0]*(1-a),
+      fgLin[1]*a+bgLin[1]*(1-a),
+      fgLin[2]*a+bgLin[2]*(1-a)
+    ]);
+    const gColor=`rgb(${gComp[0]},${gComp[1]},${gComp[2]})`;
+    const lColor=`rgb(${lComp[0]},${lComp[1]},${lComp[2]})`;
+    drawRow(2, 'white 50% over green', (ox,yo,w,h)=>{
+      ctx.fillStyle='#00b400'; ctx.fillRect(ox,yo,w,h);
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.beginPath(); ctx.arc(ox+w/2,yo+h/2,Math.min(w,h)*0.35,0,Math.PI*2); ctx.fill();
+    }, gColor, lColor);
+  })();
+})();
+</script>
+</body>
+</html>

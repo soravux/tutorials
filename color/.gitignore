@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+_preview*.png
+comparison_*.png
+corrected_*.png
+corrected_*.jpg
+tagged_*.png
+*.icc
